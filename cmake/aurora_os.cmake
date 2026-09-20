@@ -4,12 +4,12 @@ add_library(aurora_os STATIC
 	lib/dolphin/os/OSBootInfo.cpp
 	lib/dolphin/os/OSTime.cpp
 	lib/dolphin/os/OSAlloc.cpp
-	lib/dolphin/os/OSReport.cpp
 )
 
 if (AURORA_TARGET_RVL)
 	target_sources(aurora_os PRIVATE
 		lib/revolution/os/OSMemory.cpp
+		lib/revolution/os/OSReport.cpp
 		lib/revolution/os/internal.hpp
 		lib/revolution/os/OSArena.cpp
 		lib/revolution/os/OSAddress.cpp
@@ -19,6 +19,7 @@ if (AURORA_TARGET_RVL)
 else ()
 	target_sources(aurora_os PRIVATE
 		lib/dolphin/os/OSMemory.cpp
+		lib/dolphin/os/OSReport.cpp
 		lib/dolphin/os/internal.hpp
 		lib/dolphin/os/OSArena.cpp
 		lib/dolphin/os/OSAddress.cpp
