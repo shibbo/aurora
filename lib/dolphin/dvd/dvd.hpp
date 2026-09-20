@@ -51,6 +51,8 @@ struct IterateContext {
 };
 
 extern NodHandle* s_partition;
+extern std::vector<FSTEntry> s_virtualEntries;
+extern AuroraOverlayCallbacks s_virtualCallbacks;
 extern std::vector<FSTEntry> s_fstEntries;
 // Map from public FST entryNums (matching base disc, Aurora-assigned for new overlay files)
 // To the current FST indexes (that we use for navigating the tree).
@@ -68,6 +70,7 @@ extern bool s_overlayCallbacksSet;
 extern AuroraOverlayCallbacks s_overlayCallbacks;
 extern std::mutex s_fstLock;
 
+bool setVirtualEntries(const AuroraDVDEntry* entries, size_t count);
 bool rebuildFST();
 bool nameEqualsIgnoreCase(std::string_view lhs, std::string_view rhs);
 

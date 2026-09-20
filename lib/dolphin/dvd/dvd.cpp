@@ -29,6 +29,8 @@ using namespace aurora::dvd::impl;
 
 namespace aurora::dvd::impl {
   NodHandle* s_partition = nullptr;
+	std::vector<FSTEntry> s_virtualEntries;
+	AuroraOverlayCallbacks s_virtualCallbacks{};
   std::vector<FSTEntry> s_fstEntries;
   // Map from public FST entryNums (matching base disc, Aurora-assigned for new overlay entries)
   // To the current FST indexes (that we use for navigating the tree).
@@ -76,17 +78,18 @@ public:
 class CommandDataOverlay final : public CommandDataBase {
 public:
   void* handle;
-  explicit CommandDataOverlay(void* handle) : handle(handle) { }
+  AuroraOverlayCallbacks callbacks;
+  explicit CommandDataOverlay(void* handle, const AuroraOverlayCallbacks& callbacks) : handle(handle), callbacks(callbacks) { }
   ~CommandDataOverlay() override {
-    s_overlayCallbacks.close(handle);
+    callbacks.close(handle);
   }
 
   int64_t read(uint8_t* buf, size_t len) override {
-    return s_overlayCallbacks.read(handle, buf, len);
+    return callbacks.read(handle, buf, len);
   }
 
   int64_t seek(int64_t offset, int32_t whence) override {
-    return s_overlayCallbacks.seek(handle, offset, whence);
+    return callbacks.seek(handle, offset, whence);
   }
 };
 
@@ -101,6 +104,8 @@ void clearState() {
     delete s_disc;
     s_disc = nullptr;
   }
+  s_virtualEntries.clear();
+  s_virtualCallbacks = {};
   s_fstEntries.clear();
   s_entryNumToFstIndex.clear();
   s_baseEntryCount = 0;
@@ -709,6 +714,26 @@ bool aurora_dvd_open(const char* disc_path) {
   return true;
 }
 
+bool aurora_dvd_open_virtual(const AuroraDVDEntry* entries, size_t count, const AuroraOverlayCallbacks* callbacks) {
+	if (callbacks == nullptr || callbacks->open == nullptr || callbacks->close == nullptr ||
+		callbacks->read == nullptr || callbacks->seek == nullptr) {
+		return false;
+	}
+
+	s_worker.stop();
+	clearState();
+
+	if (!setVirtualEntries(entries, count) || !rebuildFST()) {
+		clearState();
+		return false;
+	}
+
+	s_virtualCallbacks = *callbacks;
+	s_initialized = true;
+	s_worker.start();
+	return true;
+}
+
 void aurora_dvd_close(void) {
   s_worker.stop();
   clearState();
@@ -1065,7 +1090,7 @@ BOOL DVDConvertEntrynumToPath(s32 entrynum, char* path, u32 maxlen) {
 BOOL DVDFastOpen(s32 entrynum, DVDFileInfo* fileInfo) {
   std::lock_guard lock(s_fstLock);
 
-  if (!s_initialized || fileInfo == nullptr || !isValidEntryNum(entrynum) || s_partition == nullptr) {
+  if (!s_initialized || fileInfo == nullptr || !isValidEntryNum(entrynum)) {
     return FALSE;
   }
 
@@ -1087,7 +1112,15 @@ BOOL DVDFastOpen(s32 entrynum, DVDFileInfo* fileInfo) {
       return FALSE;
     }
 
-    fileInfo->cb.userData = new CommandDataOverlay(handle);
+    fileInfo->cb.userData = new CommandDataOverlay(handle, s_overlayCallbacks);
+	} else if (!s_virtualEntries.empty()) {
+		void* handle = s_virtualCallbacks.open(entry.overlayData);
+
+		if (handle == nullptr) {
+			return FALSE;
+		}
+
+		fileInfo->cb.userData = new CommandDataOverlay(handle, s_virtualCallbacks);
   } else {
     NodHandle* handle = nullptr;
     NodResult result = nod_partition_open_file(s_partition, entry.origEntryNum, &handle);

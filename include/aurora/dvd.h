@@ -15,6 +15,7 @@ extern "C" {
  */
 bool aurora_dvd_open(const char* disc_path);
 
+
 /**
  * Close the disc image and free all resources.
  */
@@ -92,6 +93,16 @@ typedef struct AuroraOverlayCallbacks {
    */
   int64_t (*seek)(void* handle, int64_t offset, int32_t whence);
 } AuroraOverlayCallbacks;
+
+typedef struct AuroraDVDEntry {
+	const char* name;
+	s32 parent;
+	u32 size;
+	bool isDirectory;
+	void* userData;
+} AuroraDVDEntry;
+
+bool aurora_dvd_open_virtual(const AuroraDVDEntry* entries, size_t count, const AuroraOverlayCallbacks* callbacks);
 
 /**
  * \brief Specify callbacks for overlaid files.

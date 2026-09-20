@@ -244,10 +244,47 @@ bool validateOverlayFile(const AuroraOverlayFile& file) {
 
 namespace aurora::dvd::impl {
 
+bool setVirtualEntries(const AuroraDVDEntry* entries, size_t count) {
+	if (entries == nullptr || count == 0 || count > std::numeric_limits<s32>::max() ||
+		!entries[0].isDirectory || entries[0].parent != 0) {
+		return false;
+	}
+
+	std::vector<FSTEntry> result;
+	result.reserve(count);
+	std::vector<std::unordered_map<std::string, bool>> names(count);
+
+	for (size_t i = 0; i < count; ++i) {
+		const auto& entry = entries[i];
+
+		if (entry.name == nullptr || entry.size > std::numeric_limits<s32>::max()) {
+			return false;
+		}
+
+		const std::string name(entry.name);
+
+		if (i > 0) {
+			if (entry.parent < 0 || static_cast<size_t>(entry.parent) >= i || !entries[entry.parent].isDirectory ||
+				name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos) {
+				return false;
+			}
+
+			if (!names[entry.parent].emplace(normalizeOverlayPath(name), true).second) {
+				return false;
+			}
+		}
+
+		result.push_back({name, entry.isDirectory, entry.parent, entry.size, entry.userData, false, static_cast<s32>(i)});
+	}
+
+	s_virtualEntries = std::move(result);
+	return true;
+}
+
 bool rebuildFST() {
   using namespace std::string_literals;
 
-  if (s_partition == nullptr) {
+  if (s_partition == nullptr && s_virtualEntries.empty()) {
     return false;
   }
 
@@ -265,7 +302,19 @@ bool rebuildFST() {
   ctx.root = std::make_shared<IterateNode>(""s, true, 0, 0);
   ctx.dirStack.emplace_back(ctx.root, std::numeric_limits<u32>::max());
 
-  nod_partition_iterate_fst(s_partition, fstCallback, &ctx);
+	if (!s_virtualEntries.empty()) {
+		std::vector<std::shared_ptr<IterateNode>> nodes{ctx.root};
+
+		for (size_t i = 1; i < s_virtualEntries.size(); ++i) {
+			const auto& entry = s_virtualEntries[i];
+			auto node = std::make_shared<IterateNode>(entry.name, entry.isDir, entry.nextOrLength, static_cast<s32>(i));
+			node->overlayData = entry.overlayData;
+			nodes[entry.parent]->children.push_back(node);
+			nodes.push_back(std::move(node));
+		}
+	} else {
+		nod_partition_iterate_fst(s_partition, fstCallback, &ctx);
+	}
   s_baseEntryCount = calcEntryCount(*ctx.root);
   syncOverlayEntryAllocator();
   mergeOverlayFilesIntoContext(ctx);
