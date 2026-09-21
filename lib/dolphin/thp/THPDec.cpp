@@ -1,4 +1,6 @@
 #include "dolphin/thp.h"
+#include "aurora/thp.h"
+#include <limits>
 
 #include "../../internal.hpp"
 
@@ -214,8 +216,8 @@ s32 parse_scan_header(const u8* data, size_t size, DecodeContext& context) noexc
   return 0;
 }
 
-s32 parse_headers(const void* file, DecodeContext& context) noexcept {
-  auto reader = aurora::ByteReader::unbounded(file);
+s32 parse_headers(const void* file, size_t size, DecodeContext& context) noexcept {
+  aurora::ByteReader reader(static_cast<const u8*>(file), size);
   while (true) {
     u8 prefix = 0;
     if (!reader.try_read(prefix) || prefix != 0xFF) {
@@ -297,12 +299,18 @@ s32 parse_headers(const void* file, DecodeContext& context) noexcept {
 
 class BitReader {
 public:
-  BitReader(const u8* data, size_t byteOffset) noexcept : mData{data}, mBitPosition{byteOffset * 8} {}
+  BitReader(const u8* data, size_t size, size_t byteOffset) noexcept : mData{data}, mSize{size}, mBitPosition{byteOffset * 8} {}
+
+  bool valid() const noexcept { return mValid; }
 
   u32 read(u8 count) noexcept {
     u32 value = 0;
     for (u8 i = 0; i < count; ++i) {
       const size_t bytePosition = mBitPosition >> 3;
+      if (bytePosition >= mSize) {
+        mValid = false;
+        return 0;
+      }
       value = (value << 1) | ((mData[bytePosition] >> (7 - (mBitPosition & 7))) & 1);
       ++mBitPosition;
     }
@@ -313,13 +321,18 @@ public:
 
 private:
   const u8* mData;
+  size_t mSize;
   size_t mBitPosition;
+  bool mValid = true;
 };
 
 bool decode_huffman(BitReader& reader, const HuffmanTable& table, u8& symbol) noexcept {
   u32 code = 0;
   for (size_t length = 1; length <= 16; ++length) {
     code = (code << 1) | reader.read(1);
+    if (!reader.valid()) {
+      return false;
+    }
     const u32 firstCode = table.firstCodes[length];
     const u32 count = table.counts[length];
     if (code >= firstCode && code - firstCode < count) {
@@ -536,7 +549,7 @@ bool decode_and_write_block(BitReader& reader, DecodeContext& context, size_t co
 extern "C" {
 BOOL THPInit(void) { return TRUE; }
 
-s32 THPVideoDecode(const void* file, void* tileY, void* tileU, void* tileV, void*) {
+s32 aurora_thp_decode_video(const void* file, size_t size, void* tileY, void* tileU, void* tileV, u32 width, u32 height) {
   if (file == nullptr) {
     return kNoInput;
   }
@@ -545,15 +558,19 @@ s32 THPVideoDecode(const void* file, void* tileY, void* tileU, void* tileV, void
   }
 
   DecodeContext context{};
-  const s32 headerResult = parse_headers(file, context);
+  const s32 headerResult = parse_headers(file, size, context);
   if (headerResult != 0) {
     return headerResult;
+  }
+
+  if ((width != 0 && context.width != width) || (height != 0 && context.height != height)) {
+    return kBadSyntax;
   }
 
   const u16 chromaWidth = static_cast<u16>((context.width + 1) / 2);
   const u16 chromaHeight = static_cast<u16>((context.height + 1) / 2);
 
-  BitReader bits{static_cast<const uint8_t*>(file), context.scanOffset};
+  BitReader bits{static_cast<const uint8_t*>(file), size, context.scanOffset};
   const u16 mcuColumns = static_cast<u16>((context.width + 15) / 16);
   const u16 mcuRows = static_cast<u16>((context.height + 15) / 16);
   u32 restartCount = 0;
@@ -585,6 +602,13 @@ s32 THPVideoDecode(const void* file, void* tileY, void* tileU, void* tileV, void
       }
     }
   }
+  if (!bits.valid()) {
+    return kBadSyntax;
+  }
   return 0;
+}
+
+s32 THPVideoDecode(const void* file, void* tileY, void* tileU, void* tileV, void*) {
+  return aurora_thp_decode_video(file, std::numeric_limits<size_t>::max(), tileY, tileU, tileV, 0, 0);
 }
 }
