@@ -123,6 +123,7 @@ void configure(const GXRenderModeObj* rm) noexcept {
 Vec2<uint32_t> configured_fb_size() noexcept {
 	return render_mode_size();
 }
+
 } // namespace aurora::vi
 
 extern "C" {
@@ -271,4 +272,14 @@ void VISetWindowSize(uint32_t width, uint32_t height) { aurora::window::set_wind
 void VISetWindowPosition(uint32_t x, uint32_t y) { aurora::window::set_window_position(x, y); }
 void VICenterWindow() { aurora::window::center_window(); }
 void VISetFrameBufferScale(float scale) { aurora::window::set_frame_buffer_scale(scale); }
+
+void VILockAspectRatio(int width, int height) {
+	if (width > 0 && height > 0) {
+		aurora::window::set_frame_buffer_aspect(static_cast<float>(width) / static_cast<float>(height));
+	}
+}
+
+void VIUnlockAspectRatio() {
+	aurora::window::set_frame_buffer_aspect(0.0f);
+}
 }

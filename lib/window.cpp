@@ -30,6 +30,7 @@ extern "C" void Android_UnlockActivityMutex(void);
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <deque>
 #include <string>
 #include <vector>
@@ -48,6 +49,7 @@ SDL_Window* g_window;
 SDL_Renderer* g_renderer;
 float g_frameBufferScale = 0.f;
 bool g_frameBufferAspectFit = false;
+float g_frameBufferAspect = 0.f;
 AuroraWindowSize g_windowSize;
 std::vector<AuroraEvent> g_events;
 std::deque<std::string> g_eventStrings;
@@ -526,15 +528,19 @@ AuroraWindowSize get_window_size() {
     fb_w = scaledW;
     fb_h = scaledH;
   }
-  if (g_frameBufferAspectFit) {
-    const auto [baseW, baseH] = vi::configured_fb_size();
-    if (baseW > 0 && baseH > 0) {
-      const auto [fitW, fitH] =
-          fit_frame_buffer_to_aspect(fb_w, fb_h, static_cast<float>(baseW) / static_cast<float>(baseH));
-      fb_w = fitW;
-      fb_h = fitH;
-    }
-  }
+	float aspect = g_frameBufferAspect;
+	if (aspect == 0.f && g_frameBufferAspectFit) {
+		const auto [baseW, baseH] = vi::configured_fb_size();
+		if (baseW > 0 && baseH > 0) {
+			aspect = static_cast<float>(baseW) / static_cast<float>(baseH);
+		}
+	}
+
+	if (aspect > 0.f) {
+		const auto [fitW, fitH] = fit_frame_buffer_to_aspect(fb_w, fb_h, aspect);
+		fb_w = fitW;
+		fb_h = fitH;
+	}
 
   const float scale = SDL_GetWindowDisplayScale(g_window);
   return {
@@ -649,6 +655,15 @@ void set_frame_buffer_aspect_fit(bool fit) {
 
   g_frameBufferAspectFit = fit;
   request_frame_buffer_resize();
+}
+
+void set_frame_buffer_aspect(float aspect) {
+	if (!std::isfinite(aspect) || aspect < 0.f || g_frameBufferAspect == aspect) {
+		return;
+	}
+
+	g_frameBufferAspect = aspect;
+	request_frame_buffer_resize();
 }
 
 void set_background_input(bool value) { SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, value ? "1" : "0"); }
