@@ -1,0 +1,7 @@
+if (AURORA_TARGET_RVL)
+	add_library(aurora_ai STATIC lib/revolution/ai/ai.cpp)
+	add_library(aurora::ai ALIAS aurora_ai)
+	set_target_properties(aurora_ai PROPERTIES FOLDER "aurora")
+	target_include_directories(aurora_ai PUBLIC include)
+	target_link_libraries(aurora_ai PUBLIC aurora::os PRIVATE aurora::core)
+endif ()

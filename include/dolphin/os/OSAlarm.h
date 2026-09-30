@@ -17,7 +17,15 @@ struct OSAlarm {
     OSAlarm* next;
     OSTime period;
     OSTime start;
+#ifdef RVL
+	void* userData;
+#endif
 };
+
+#ifdef RVL
+void OSSetAlarmUserData(OSAlarm* alarm, void* data);
+void* OSGetAlarmUserData(const OSAlarm* alarm);
+#endif
 
 BOOL OSCheckAlarmQueue(void);
 void OSInitAlarm(void);

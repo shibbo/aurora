@@ -23,74 +23,77 @@ namespace aurora::gx::fifo {
 namespace {
 constexpr Module Log{"aurora::gx::fifo"};
 
-u16 prepare_idx_buffer(ByteBuffer& buf, GXPrimitive prim, u16 vtxStart, u16 vtxCount) noexcept {
-  u16 numIndices = 0;
-  if (prim == GX_QUADS) {
-    buf.reserve_extra((vtxCount / 4) * 6 * sizeof(u16));
+u32 prepare_idx_buffer(ByteBuffer& buf, GXPrimitive prim, u16 vtxStart, u16 vtxCount) noexcept {
+	if (prim == GX_LINES || prim == GX_LINESTRIP || prim == GX_POINTS) {
+		constexpr std::array<u16, 6> indices{0, 1, 3, 3, 2, 0};
+		buf.append(indices);
+		return indices.size();
+	}
 
-    for (u16 v = 0; v < vtxCount; v += 4) {
-      u16 idx0 = vtxStart + v;
-      u16 idx1 = vtxStart + v + 1;
-      u16 idx2 = vtxStart + v + 2;
-      u16 idx3 = vtxStart + v + 3;
+	struct Pattern {
+		std::vector<u16> indices;
+		u32 vertices = 0;
+	};
+	static std::array<Pattern, 4> patterns;
+	size_t slot;
+	u32 count;
+	if (prim == GX_QUADS) {
+		slot = 0;
+		count = ((u32(vtxCount) + 3) / 4) * 6;
+	} else if (prim == GX_TRIANGLES) {
+		slot = 1;
+		count = vtxCount;
+	} else if (prim == GX_TRIANGLEFAN) {
+		slot = 2;
+		count = vtxCount;
+		if (vtxCount > 3) {
+			count = (u32(vtxCount) - 2) * 3;
+		}
+	} else if (prim == GX_TRIANGLESTRIP) {
+		slot = 3;
+		count = vtxCount;
+		if (vtxCount > 3) {
+			count = (u32(vtxCount) - 2) * 3;
+		}
+	} else {
+		FATAL("unsupported primitive type {}", static_cast<u32>(prim));
+	}
 
-      buf.append(idx0);
-      buf.append(idx1);
-      buf.append(idx2);
-      numIndices += 3;
+	if (count == 0) {
+		return 0;
+	}
 
-      buf.append(idx2);
-      buf.append(idx3);
-      buf.append(idx0);
-      numIndices += 3;
-    }
-  } else if (prim == GX_TRIANGLES) {
-    buf.reserve_extra(vtxCount * sizeof(u16));
-    for (u16 v = 0; v < vtxCount; ++v) {
-      const u16 idx = vtxStart + v;
-      buf.append(idx);
-      ++numIndices;
-    }
-  } else if (prim == GX_TRIANGLEFAN) {
-    buf.reserve_extra(((u32(vtxCount) - 3) * 3 + 3) * sizeof(u16));
-    for (u16 v = 0; v < vtxCount; ++v) {
-      const u16 idx = vtxStart + v;
-      if (v < 3) {
-        buf.append(idx);
-        ++numIndices;
-        continue;
-      }
-      buf.append(std::array{vtxStart, static_cast<u16>(idx - 1), idx});
-      numIndices += 3;
-    }
-  } else if (prim == GX_TRIANGLESTRIP) {
-    buf.reserve_extra(((static_cast<u32>(vtxCount) - 3) * 3 + 3) * sizeof(u16));
-    for (u16 v = 0; v < vtxCount; ++v) {
-      const u16 idx = vtxStart + v;
-      if (v < 3) {
-        buf.append(idx);
-        ++numIndices;
-        continue;
-      }
-      if ((v & 1) == 0) {
-        buf.append(std::array{static_cast<u16>(idx - 2), static_cast<u16>(idx - 1), idx});
-      } else {
-        buf.append(std::array{static_cast<u16>(idx - 1), static_cast<u16>(idx - 2), idx});
-      }
-      numIndices += 3;
-    }
-  } else if (prim == GX_LINES || prim == GX_LINESTRIP || prim == GX_POINTS) {
-    buf.reserve_extra(6 * sizeof(u16));
-    buf.append<u16>(0);
-    buf.append<u16>(1);
-    buf.append<u16>(3);
-    buf.append<u16>(3);
-    buf.append<u16>(2);
-    buf.append<u16>(0);
-    numIndices = 6;
-  } else
-    UNLIKELY FATAL("unsupported primitive type {}", static_cast<u32>(prim));
-  return numIndices;
+	auto& pattern = patterns[slot];
+	if (pattern.vertices < vtxCount) {
+		pattern.indices.reserve(count);
+		for (u32 v = pattern.vertices; v < vtxCount; ++v) {
+			if (prim == GX_QUADS) {
+				pattern.indices.insert(pattern.indices.end(), {u16(v), u16(v + 1), u16(v + 2),
+					u16(v + 2), u16(v + 3), u16(v)});
+				v += 3;
+				pattern.vertices = v + 1;
+			} else if (prim == GX_TRIANGLES || v < 3) {
+				pattern.indices.push_back(static_cast<u16>(v));
+			} else if (prim == GX_TRIANGLEFAN) {
+				pattern.indices.insert(pattern.indices.end(), {0, u16(v - 1), u16(v)});
+			} else if ((v & 1) == 0) {
+				pattern.indices.insert(pattern.indices.end(), {u16(v - 2), u16(v - 1), u16(v)});
+			} else {
+				pattern.indices.insert(pattern.indices.end(), {u16(v - 1), u16(v - 2), u16(v)});
+			}
+		}
+		pattern.vertices = std::max(pattern.vertices, u32(vtxCount));
+	}
+
+	const size_t offset = buf.size();
+	buf.append(pattern.indices.data(), count * sizeof(u16));
+	if (vtxStart != 0) {
+		auto* indices = reinterpret_cast<u16*>(buf.data() + offset);
+		for (u32 i = 0; i < count; ++i) {
+			indices[i] = static_cast<u16>(indices[i] + vtxStart);
+		}
+	}
+	return count;
 }
 
 // GX FIFO opcodes - use CP_ prefix to avoid clashing with GXCommandList.h macros
@@ -227,6 +230,9 @@ ProcessResult process(const u8* data, u32 size) noexcept {
     case CP_CMD_LOAD_BP_REG: {
       const u32 value = reader.read<u32>();
       handle_bp(value);
+      if (reg_get(value, 8, 24) == 0x48) {
+        return {static_cast<u32>(reader.offset()), false, true, static_cast<u16>(value)};
+      }
       if (reg_get(value, 8, 24) == GX_BP_REG_DRAWDONE) {
         return {static_cast<u32>(reader.offset()), true};
       }
@@ -500,7 +506,8 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& 
   const bool cleanState = g_gxState.dirty == 0 && fmt == sDrawCache.lastDrawFmt && sDrawCache.lineMode == 0 &&
                           prim != GX_LINES && prim != GX_LINESTRIP && prim != GX_POINTS;
   auto* lastDraw = cleanState ? gfx::get_last_draw_command<DrawData>() : nullptr;
-  const bool canMerge = lastDraw != nullptr && lastDraw->instanceCount == 1;
+  const bool canMerge = lastDraw != nullptr && lastDraw->instanceCount == 1 &&
+                        u32(lastDraw->vtxCount) + vtxCount <= 0xffff;
 
   // Push raw vertex data to buffer. Merged draws must remain contiguous with the previous range.
   const auto vertexData = reader.take(totalVtxBytes);
@@ -606,6 +613,32 @@ void handle_aurora(ByteReader& reader) noexcept {
       array.cachedRange = {};
       g_gxState.dirty |= DirtyImmediates;
     }
+  } else if (subCmd == GX_AURORA_LOAD_TEX_POINTER) {
+	const auto id = reader.read<u8>();
+	CHECK(id < MaxTextures, "invalid texture map id {}", id);
+	auto& slot = g_gxState.loadedTextures[id];
+	slot.data = reinterpret_cast<const void*>(reader.read<u64>());
+	slot.mWidth = 0;
+	slot.mHeight = 0;
+	slot.mFormat = gfx::InvalidTextureFormat;
+	slot.texObjId = 0;
+	slot.texDataVersion = 0;
+	slot.flags = 0;
+	if (((slot.mode1 >> 8) & 0xff) != 0) {
+		slot.flags |= 1;
+	}
+	g_gxState.dirty |= DirtyTextures;
+  } else if (subCmd == GX_AURORA_LOAD_TLUT_POINTER) {
+	const auto id = reader.read<u8>();
+	CHECK(id < MaxTluts, "invalid tlut slot {}", id);
+	auto& slot = g_gxState.loadedTluts[id];
+	slot.data = reinterpret_cast<const void*>(reader.read<u64>());
+	slot.format = static_cast<GXTlutFmt>(reader.read<u32>());
+	slot.numEntries = reader.read<u16>();
+	slot.tlutObjId = 0;
+	slot.tlutDataVersion = 0;
+	slot.flags = 0;
+	g_gxState.dirty |= DirtyTextures;
   } else if (subCmd == GX_AURORA_LOAD_TEXOBJ) {
     const auto texMapId = reader.read<u8>();
     CHECK(texMapId < MaxTextures, "invalid texture map id {}", texMapId);

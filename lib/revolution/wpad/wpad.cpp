@@ -26,6 +26,7 @@ struct Channel {
 	std::optional<AuroraWpadPointer> pointer;
 	std::optional<Vec> coreAcc, nunchukAcc;
 	Sample sample{};
+	std::vector<u8> faceData;
 };
 
 struct Completion {
@@ -725,4 +726,38 @@ s32 WPADSendStreamData(s32 chan, void*, u16) {
 	}
 
 	return status;
+}
+
+BOOL aurora_wpad_set_face_data(s32 chan, const void* data, u16 size) {
+	if (!valid(chan) || (data == nullptr && size != 0)) {
+		return FALSE;
+	}
+
+	auto& bytes = channels[chan].faceData;
+	if (size == 0) {
+		bytes.clear();
+	} else {
+		const auto* begin = static_cast<const u8*>(data);
+		bytes.assign(begin, begin + size);
+	}
+
+	return TRUE;
+}
+
+s32 WPADReadFaceData(s32 chan, void* buffer, u16 size, u16 address, WPADCallback callback) {
+	s32 status = result(chan);
+	if (buffer == nullptr || size == 0) {
+		status = WPAD_ERR_INVALID;
+	}
+
+	if (status == WPAD_ERR_NONE) {
+		const auto& bytes = channels[chan].faceData;
+		if (static_cast<size_t>(address) + size > bytes.size()) {
+			status = WPAD_ERR_TRANSFER;
+		} else {
+			std::memcpy(buffer, bytes.data() + address, size);
+		}
+	}
+
+	return complete(chan, status, callback);
 }

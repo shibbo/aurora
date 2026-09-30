@@ -96,6 +96,10 @@ void finish_draw() noexcept;
 // Makes commands written so far available to the FIFO processor.
 void publish() noexcept;
 
+using DrawSyncCallback = void (*)(uint16_t);
+DrawSyncCallback set_draw_sync_callback(DrawSyncCallback callback) noexcept;
+uint16_t draw_sync_token() noexcept;
+
 using DrawDoneCallback = void (*)();
 DrawDoneCallback set_draw_done_callback(DrawDoneCallback callback) noexcept;
 

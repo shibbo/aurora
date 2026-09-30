@@ -1,5 +1,6 @@
 #include <dolphin/gd.h>
 #include <dolphin/os.h>
+#include <dolphin/gx/GXAurora.h>
 
 u8 GD2HWFiltConv[] = {0, 4, 1, 5, 2, 6};
 
@@ -26,6 +27,24 @@ void GDSetTexImgAttr(GXTexMapID id, u16 width, u16 height, GXTexFmt format) {
 
 void GDSetTexImgPtr(GXTexMapID id, void* image_ptr) {
     GDWriteBPCmd(BP_IMAGE_PTR(OSCachedToPhysical(image_ptr) >> 5, GDTexImage3Ids[id]));
+}
+
+void GDSetTexImgPtrNative(GXTexMapID id, const void* image_ptr) {
+	GDOverflowCheck(12);
+	GDWrite_u8(GX_AURORA);
+	GDWrite_u16(GX_AURORA_LOAD_TEX_POINTER);
+	GDWrite_u8(static_cast<u8>(id));
+	GDWrite_u64(reinterpret_cast<uintptr_t>(image_ptr));
+}
+
+void GDLoadTlutNative(const void* data, GXTlut name, GXTlutFmt format, u16 entries) {
+	GDOverflowCheck(18);
+	GDWrite_u8(GX_AURORA);
+	GDWrite_u16(GX_AURORA_LOAD_TLUT_POINTER);
+	GDWrite_u8(static_cast<u8>(name));
+	GDWrite_u64(reinterpret_cast<uintptr_t>(data));
+	GDWrite_u32(static_cast<u32>(format));
+	GDWrite_u16(entries);
 }
 
 void GDSetTexImgPtrRaw(GXTexMapID id, u32 image_ptr_raw) {

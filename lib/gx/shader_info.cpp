@@ -295,6 +295,13 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
     }
   }
 
+	if (config.zTextureOp != GX_ZT_DISABLE) {
+		const auto& stage = config.tevStages[config.tevStageCount - 1];
+		info.sampledTexCoords.set(stage.texCoordId);
+		info.sampledTextures.set(stage.texMapId);
+		info.usesZTexture = true;
+	}
+
   // Emboss bump needs its source texcoord generated and a light enabled
   for (int i = 0; i < info.sampledTexCoords.size(); ++i) {
     if (!info.sampledTexCoords.test(i)) {
@@ -357,6 +364,9 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
     info.usesFog = true;
     info.uniformSize += sizeof(Fog);
   }
+	if (info.usesZTexture) {
+		info.uniformSize += sizeof(Vec4<u32>);
+	}
   info.uniformSize += MaxTexCoord * sizeof(Vec4<float>);
   if (info.usedIndTexMtxs.any()) {
     info.uniformSize += MaxIndTexMtxs * sizeof(Mat2x4<float>);
@@ -474,6 +484,9 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
     fog.rangeK[2][3] = fog.rangeK[2][1];
     buf.append(fog);
   }
+	if (info.usesZTexture) {
+		buf.append(Vec4<u32>{g_gxState.zTextureBias, 0, 0, 0});
+	}
   for (const auto& scale : g_gxState.texCoordScales) {
     buf.append(Vec4{static_cast<f32>(scale.scaleS) + 1.0f, static_cast<f32>(scale.scaleT) + 1.0f, 0.0f, 0.0f});
   }

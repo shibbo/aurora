@@ -1,6 +1,7 @@
 #include "frame.hpp"
 
 #include "depth_peek.hpp"
+#include "color_peek.hpp"
 #include "pipeline_cache.hpp"
 #include "recording.hpp"
 #include "render_worker.hpp"
@@ -392,6 +393,7 @@ void initialize() {
   //   }
   // });
   depth_peek::initialize();
+  color_peek::initialize();
   tex_copy_conv::initialize();
   tex_palette_conv::initialize();
 
@@ -531,6 +533,7 @@ void shutdown() {
     g_presentTimes.clear();
   }
   shutdown_pipeline_cache();
+  color_peek::shutdown();
   depth_peek::shutdown();
   tex_copy_conv::shutdown();
   tex_palette_conv::shutdown();
@@ -703,6 +706,13 @@ void after_submit() noexcept { depth_peek::after_submit(); }
 void gpu_synchronize() { render_worker::synchronize(); }
 
 void synchronize() { render_worker::synchronize(); }
+
+void wait_draw_sync() {
+	render_worker::synchronize();
+	while (!color_peek::is_idle()) {
+		wait_for_gpu_progress(std::chrono::milliseconds{1});
+	}
+}
 
 void after_present() noexcept {
   const auto now = PresentClock::now();

@@ -7,6 +7,9 @@
 extern "C" {
 #endif
 
+#define WPAD_RESULT_SUCCESS 0
+#define WPAD_RESULT_ERR_1 -1
+#define WPAD_RESULT_ERR_3 -3
 #define WPAD_CHAN0 0
 #define WPAD_CHAN1 1
 #define WPAD_CHAN2 2
@@ -85,6 +88,7 @@ extern "C" {
 typedef s32 WPADChannel;
 typedef u32 WPADDeviceType;
 typedef void (*WPADCallback)(s32 chan, s32 result);
+s32 WPADReadFaceData(s32 chan, void* buffer, u16 size, u16 address, WPADCallback callback);
 typedef WPADCallback WPADConnectCallback;
 typedef WPADCallback WPADExtensionCallback;
 typedef void (*WPADSamplingCallback)(s32 chan);

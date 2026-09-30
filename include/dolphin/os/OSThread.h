@@ -7,6 +7,12 @@
 extern "C" {
 #endif
 
+#ifdef __cplusplus
+#define OS_THREAD_MAY_THROW noexcept(false)
+#else
+#define OS_THREAD_MAY_THROW
+#endif
+
 typedef s32 OSPriority;
 
 typedef struct OSThread OSThread;
@@ -77,22 +83,25 @@ typedef void (*OSSwitchThreadCallback)(OSThread*, OSThread*);
 typedef void (*OSIdleFunction)(void*);
 
 void OSInitThreadQueue(OSThreadQueue* queue);
-void OSSleepThread(OSThreadQueue* queue);
+void OSSleepThread(OSThreadQueue* queue) OS_THREAD_MAY_THROW;
 void OSWakeupThread(OSThreadQueue* queue);
-s32 OSSuspendThread(OSThread* thread);
+s32 OSSuspendThread(OSThread* thread) OS_THREAD_MAY_THROW;
 s32 OSResumeThread(OSThread* thread);
 OSThread* OSGetCurrentThread(void);
 s32 OSEnableScheduler(void);
-s32 OSDisableScheduler(void);
-void OSCancelThread(OSThread* thread);
+s32 OSDisableScheduler(void) OS_THREAD_MAY_THROW;
+void OSCancelThread(OSThread* thread) OS_THREAD_MAY_THROW;
 void OSClearStack(u8 val);
 BOOL OSIsThreadSuspended(OSThread* thread);
 BOOL OSIsThreadTerminated(OSThread* thread);
-void OSYieldThread(void);
+void OSYieldThread(void) OS_THREAD_MAY_THROW;
+#ifdef RVL
+void OSSleepTicks(OSTime ticks) OS_THREAD_MAY_THROW;
+#endif
 BOOL OSCreateThread(OSThread* thread, void* (*func)(void*), void* param, void* stack, u32 stackSize,
                     OSPriority priority, u16 attr);
-void OSExitThread(void* val);
-BOOL OSJoinThread(OSThread* thread, void** val);
+void OSExitThread(void* val) OS_THREAD_MAY_THROW;
+BOOL OSJoinThread(OSThread* thread, void** val) OS_THREAD_MAY_THROW;
 void OSDetachThread(OSThread* thread);
 BOOL OSSetThreadPriority(OSThread* thread, OSPriority priority);
 s32 OSGetThreadPriority(OSThread* thread);

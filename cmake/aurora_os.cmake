@@ -9,6 +9,15 @@ add_library(aurora_os STATIC
 if (AURORA_TARGET_RVL)
 	target_sources(aurora_os PRIVATE
 		lib/revolution/os/OSMemory.cpp
+		lib/revolution/os/OSSynchronization.cpp
+		lib/revolution/os/OSAlarm.cpp
+		lib/revolution/os/OSReset.cpp
+		lib/revolution/os/OSNative.hpp
+		lib/revolution/sc/sc.cpp
+		lib/revolution/mem/allocator.cpp
+		lib/revolution/mem/mem_list.c
+		lib/revolution/mem/mem_heapCommon.c
+		lib/revolution/mem/mem_expHeap.c
 		lib/revolution/os/OSReport.cpp
 		lib/revolution/os/internal.hpp
 		lib/revolution/os/OSArena.cpp

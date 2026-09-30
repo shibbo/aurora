@@ -1,0 +1,17 @@
+if (MSVC)
+	string(REGEX REPLACE "(^| )[/-]RTC[^ ]*" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+	foreach (flag Od Ob0)
+		string(REGEX REPLACE "(^| )[/-]${flag}( |$)" " " CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+	endforeach ()
+endif ()
+
+add_library(aurora_thp STATIC THPAudio.cpp THPDec.cpp)
+add_library(aurora::thp ALIAS aurora_thp)
+set_target_properties(aurora_thp PROPERTIES FOLDER "aurora" MSVC_RUNTIME_CHECKS "")
+target_link_libraries(aurora_thp PUBLIC aurora::core)
+
+if (MSVC)
+	target_compile_options(aurora_thp PRIVATE $<$<CONFIG:Debug>:/O2> $<$<CONFIG:Debug>:/Ob2>)
+else ()
+	target_compile_options(aurora_thp PRIVATE $<$<CONFIG:Debug>:-O2>)
+endif ()

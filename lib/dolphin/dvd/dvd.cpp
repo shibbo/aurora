@@ -19,6 +19,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 #include "dvd.hpp"
@@ -94,8 +95,25 @@ public:
 };
 
 CommandDataNod* s_disc;
+std::mutex s_fileHandleMutex;
+std::unordered_map<const DVDCommandBlock*, std::unique_ptr<CommandDataBase>> s_fileHandles;
+
+CommandDataBase* getFileHandle(const DVDCommandBlock* block) {
+	std::lock_guard lock(s_fileHandleMutex);
+	const auto it = s_fileHandles.find(block);
+	if (it == s_fileHandles.end()) {
+		return nullptr;
+	}
+
+	return it->second.get();
+}
 
 void clearState() {
+	{
+		std::lock_guard lock(s_fileHandleMutex);
+		s_fileHandles.clear();
+	}
+
   if (s_partition != nullptr) {
     nod_free(s_partition);
     s_partition = nullptr;
@@ -323,10 +341,11 @@ bool isCommandBlockIdle(const DVDCommandBlock* block) {
 }
 
 CommandDataBase* getCommandHandle(DVDCommandBlock* block) {
-  if (block != nullptr && block->userData != nullptr) {
-    return static_cast<CommandDataBase*>(block->userData);
-  }
-  return s_disc;
+	if (auto* handle = getFileHandle(block)) {
+		return handle;
+	}
+
+	return s_disc;
 }
 
 void beginCommand(DVDCommandBlock* block, u32 command, void* addr, u32 length, u32 offset, DVDCBCallback callback) {
@@ -1106,13 +1125,14 @@ BOOL DVDFastOpen(s32 entrynum, DVDFileInfo* fileInfo) {
   fileInfo->startAddr = 0;
   fileInfo->length = entry.nextOrLength;
 
+  std::unique_ptr<CommandDataBase> fileHandle;
   if (entry.isOverlay) {
     const auto handle = s_overlayCallbacks.open(entry.overlayData);
     if (!handle) {
       return FALSE;
     }
 
-    fileInfo->cb.userData = new CommandDataOverlay(handle, s_overlayCallbacks);
+    fileHandle = std::make_unique<CommandDataOverlay>(handle, s_overlayCallbacks);
 	} else if (!s_virtualEntries.empty()) {
 		void* handle = s_virtualCallbacks.open(entry.overlayData);
 
@@ -1120,7 +1140,7 @@ BOOL DVDFastOpen(s32 entrynum, DVDFileInfo* fileInfo) {
 			return FALSE;
 		}
 
-		fileInfo->cb.userData = new CommandDataOverlay(handle, s_virtualCallbacks);
+		fileHandle = std::make_unique<CommandDataOverlay>(handle, s_virtualCallbacks);
   } else {
     NodHandle* handle = nullptr;
     NodResult result = nod_partition_open_file(s_partition, entry.origEntryNum, &handle);
@@ -1128,8 +1148,13 @@ BOOL DVDFastOpen(s32 entrynum, DVDFileInfo* fileInfo) {
       return FALSE;
     }
 
-    fileInfo->cb.userData = new CommandDataNod(handle);
+    fileHandle = std::make_unique<CommandDataNod>(handle);
   }
+
+	{
+		std::lock_guard lock(s_fileHandleMutex);
+		s_fileHandles[&fileInfo->cb] = std::move(fileHandle);
+	}
 
   atomic_store_release(fileInfo->cb.state, DVD_STATE_END);
   return TRUE;
@@ -1148,10 +1173,15 @@ BOOL DVDClose(DVDFileInfo* fileInfo) {
     return FALSE;
   }
   s_worker.drain_command(&fileInfo->cb);
-  if (fileInfo->cb.userData != nullptr) {
-    delete static_cast<CommandDataBase*>(fileInfo->cb.userData);
-    fileInfo->cb.userData = nullptr;
-  }
+	std::unique_ptr<CommandDataBase> fileHandle;
+	{
+		std::lock_guard lock(s_fileHandleMutex);
+		const auto it = s_fileHandles.find(&fileInfo->cb);
+		if (it != s_fileHandles.end()) {
+			fileHandle = std::move(it->second);
+			s_fileHandles.erase(it);
+		}
+	}
   atomic_store_release(fileInfo->cb.state, DVD_STATE_END);
   return TRUE;
 }
@@ -1187,6 +1217,10 @@ BOOL DVDChangeDir(const char* dirName) {
 }
 
 BOOL DVDReadAsyncPrio(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset, DVDCallback callback, s32 prio) {
+	if (fileInfo == nullptr || getFileHandle(&fileInfo->cb) == nullptr) {
+		return FALSE;
+	}
+
   ASSERTMSGLINE(0x2C7, fileInfo, "DVDReadAsync(): null pointer is specified to file info address  ");
   ASSERTMSGLINE(0x2C8, addr, "DVDReadAsync(): null pointer is specified to addr  ");
 
@@ -1196,8 +1230,7 @@ BOOL DVDReadAsyncPrio(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset,
                 "DVDReadAsync(): specified area is out of the file  ");
 
   fileInfo->callback = callback;
-  DVDReadAbsAsyncPrio(&fileInfo->cb, addr, length, offset, cbForReadAsync, prio);
-  return TRUE;
+	return DVDReadAbsAsyncPrio(&fileInfo->cb, addr, length, offset, cbForReadAsync, prio);
 }
 
 s32 DVDReadPrio(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset, s32 prio) {
@@ -1216,6 +1249,10 @@ s32 DVDReadPrio(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset, s32 p
 }
 
 int DVDSeekAsyncPrio(DVDFileInfo* fileInfo, s32 offset, void (*callback)(s32, DVDFileInfo*), s32 prio) {
+	if (fileInfo == nullptr || getFileHandle(&fileInfo->cb) == nullptr) {
+		return FALSE;
+	}
+
   ASSERTMSGLINE(0x368, fileInfo, "DVDSeek(): null pointer is specified to file info address  ");
   ASSERTMSGLINE(0x36C, !(offset & 3), "DVDSeek(): offset must be multiple of 4 byte  ");
 
@@ -1223,8 +1260,7 @@ int DVDSeekAsyncPrio(DVDFileInfo* fileInfo, s32 offset, void (*callback)(s32, DV
                 "DVDSeek(): offset is out of the file  ");
 
   fileInfo->callback = callback;
-  DVDSeekAbsAsyncPrio(&fileInfo->cb, offset, cbForSeekAsync, prio);
-  return 1;
+	return DVDSeekAbsAsyncPrio(&fileInfo->cb, offset, cbForSeekAsync, prio);
 }
 
 s32 DVDSeekPrio(DVDFileInfo* fileInfo, s32 offset, s32 prio) {
@@ -1330,7 +1366,7 @@ void* DVDGetFSTLocation(void) {
 
 BOOL DVDPrepareStreamAsync(DVDFileInfo* fileInfo, u32 length, u32 offset, DVDCallback callback) {
   ASSERTMSGLINE(0x46C, fileInfo, "DVDPrepareStreamAsync(): NULL file info was specified");
-  if (fileInfo == nullptr || fileInfo->cb.userData == nullptr) {
+  if (fileInfo == nullptr || getFileHandle(&fileInfo->cb) == nullptr) {
     return FALSE;
   }
   if (length == 0) {

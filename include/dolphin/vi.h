@@ -14,7 +14,11 @@ void VIConfigure(const GXRenderModeObj *rm);
 void VIConfigurePan(u16 xOrg, u16 yOrg, u16 width, u16 height);
 void VIFlush(void);
 
+#if defined(__cplusplus) && defined(TARGET_PC)
+void VIWaitForRetrace(void) noexcept(false);
+#else
 void VIWaitForRetrace(void);
+#endif
 
 u32 VIGetTvFormat(void);
 u32 VIGetRetraceCount(void);

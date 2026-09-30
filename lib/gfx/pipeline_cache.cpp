@@ -4,6 +4,7 @@
 #include "resources.hpp"
 #include "hash.hpp"
 #include "../gx/pipeline.hpp"
+#include "../gx/shader_info.hpp"
 #include "../io.hpp"
 #ifdef AURORA_ENABLE_RMLUI
 #include "../rmlui/pipeline.hpp"
@@ -20,6 +21,8 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <type_traits>
+#include <vector>
 
 #include <SDL3/SDL_iostream.h>
 #include <absl/container/flat_hash_map.h>
@@ -67,7 +70,7 @@ constexpr size_t BuildPipelinesPerFrame = 5;
 #else
 constexpr size_t BuildPipelinesPerFrame = 1;
 #endif
-static std::thread g_pipelineThread;
+static std::vector<std::thread> g_pipelineThreads;
 static std::atomic_bool g_pipelineThreadEnd = false;
 static std::condition_variable g_pipelineQueueCv;
 static std::condition_variable g_pipelineReadyCv;
@@ -369,33 +372,40 @@ static auto find_pending_pipeline(Queue& queue, PipelineRef hash) {
 
 enum class PipelinePriority {
   Background, // loaded from cache
-  Normal,     // async skip draw
+  Normal,
   Blocking,   // block until compiled
 };
 
 static PendingPipeline* touch_pending_pipeline(PipelineRef hash, PipelinePriority priority) {
-  auto priorityIt = find_pending_pipeline(g_pipelineQueue, hash);
-  if (priorityIt != g_pipelineQueue.end()) {
-    return &*priorityIt;
-  }
+	auto priorityIt = find_pending_pipeline(g_pipelineQueue, hash);
+	if (priorityIt != g_pipelineQueue.end()) {
+		if (priority == PipelinePriority::Blocking && priorityIt != g_pipelineQueue.begin()) {
+			PendingPipeline pending = std::move(*priorityIt);
+			g_pipelineQueue.erase(priorityIt);
+			g_pipelineQueue.emplace_front(std::move(pending));
+			return &g_pipelineQueue.front();
+		}
 
-  auto backgroundIt = find_pending_pipeline(g_backgroundPipelineQueue, hash);
-  if (backgroundIt == g_backgroundPipelineQueue.end()) {
-    return nullptr;
-  }
-  switch (priority) {
-  case PipelinePriority::Background:
-    return &*backgroundIt;
-  case PipelinePriority::Normal:
-    g_pipelineQueue.emplace_back(std::move(*backgroundIt));
-    g_backgroundPipelineQueue.erase(backgroundIt);
-    return &g_pipelineQueue.back();
-  case PipelinePriority::Blocking:
-    g_pipelineQueue.emplace_front(std::move(*backgroundIt));
-    g_backgroundPipelineQueue.erase(backgroundIt);
-    return &g_pipelineQueue.front();
-  }
-  return nullptr;
+		return &*priorityIt;
+	}
+
+	auto backgroundIt = find_pending_pipeline(g_backgroundPipelineQueue, hash);
+	if (backgroundIt == g_backgroundPipelineQueue.end()) {
+		return nullptr;
+	}
+	switch (priority) {
+	case PipelinePriority::Background:
+		return &*backgroundIt;
+	case PipelinePriority::Normal:
+		g_pipelineQueue.emplace_back(std::move(*backgroundIt));
+		g_backgroundPipelineQueue.erase(backgroundIt);
+		return &g_pipelineQueue.back();
+	case PipelinePriority::Blocking:
+		g_pipelineQueue.emplace_front(std::move(*backgroundIt));
+		g_backgroundPipelineQueue.erase(backgroundIt);
+		return &g_pipelineQueue.front();
+	}
+	return nullptr;
 }
 
 static std::optional<PendingPipeline> take_pending_pipeline(PipelineRef hash) {
@@ -965,45 +975,50 @@ static void pipeline_cache_writer() {
 
 static void pipeline_worker() {
 #ifdef TRACY_ENABLE
-  tracy::SetThreadName("Pipeline compilation thread");
+	tracy::SetThreadName("Pipeline compilation thread");
 #endif
 
-  bool hasMore = false;
-  while (g_hasPipelineThread || g_pipelinesPerFrame < BuildPipelinesPerFrame) {
-    PendingPipeline pending;
-    {
-      std::unique_lock lock{g_pipelineMutex};
-      if (g_hasPipelineThread) {
-        if (!hasMore) {
-          g_pipelineQueueCv.wait(lock, [] {
-            return !g_pipelineQueue.empty() || !g_backgroundPipelineQueue.empty() || g_pipelineThreadEnd;
-          });
-        }
-      } else if (g_pipelineQueue.empty() && g_backgroundPipelineQueue.empty()) {
-        return;
-      }
-      if (g_pipelineThreadEnd) {
-        break;
-      }
-      auto& source = !g_pipelineQueue.empty() ? g_pipelineQueue : g_backgroundPipelineQueue;
-      pending = std::move(source.front());
-      source.pop_front();
-    }
-    auto result = pending.create();
-    {
-      std::lock_guard lock{g_pipelineMutex};
-      g_pipelines.try_emplace(pending.hash, CachedPipeline{
-                                                .pipeline = std::move(result),
-                                                .firstFrameUsed = pending.firstFrameUsed,
-                                            });
-      g_pendingPipelines.erase(pending.hash);
-      hasMore = !g_pipelineQueue.empty() || !g_backgroundPipelineQueue.empty();
-    }
-    if (!g_hasPipelineThread) {
-      ++g_pipelinesPerFrame;
-    }
-    notify_pipeline_ready(true);
-  }
+	while (g_hasPipelineThread || g_pipelinesPerFrame < BuildPipelinesPerFrame) {
+		PendingPipeline pending;
+		{
+			std::unique_lock lock{g_pipelineMutex};
+			if (g_hasPipelineThread) {
+				g_pipelineQueueCv.wait(lock, [] {
+					return !g_pipelineQueue.empty() || !g_backgroundPipelineQueue.empty() || g_pipelineThreadEnd;
+				});
+			} else if (g_pipelineQueue.empty() && g_backgroundPipelineQueue.empty()) {
+				return;
+			}
+
+			if (g_pipelineThreadEnd) {
+				break;
+			}
+
+			auto* source = &g_pipelineQueue;
+			if (source->empty()) {
+				source = &g_backgroundPipelineQueue;
+			}
+
+			pending = std::move(source->front());
+			source->pop_front();
+		}
+
+		auto result = pending.create();
+		{
+			std::lock_guard lock{g_pipelineMutex};
+			g_pipelines.try_emplace(pending.hash, CachedPipeline{
+				.pipeline = std::move(result),
+				.firstFrameUsed = pending.firstFrameUsed,
+			});
+			g_pendingPipelines.erase(pending.hash);
+		}
+
+		if (!g_hasPipelineThread) {
+			++g_pipelinesPerFrame;
+		}
+
+		notify_pipeline_ready(true);
+	}
 }
 
 template <typename PipelineConfig, typename CreateFn>
@@ -1039,6 +1054,22 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
     if (config.version != configVersion) {
       continue;
     }
+
+		if constexpr (std::is_same_v<PipelineConfig, gx::PipelineConfig>) {
+			const auto info = gx::build_shader_info(config.shaderConfig);
+			bool valid = true;
+			for (size_t i = 0; i < config.shaderConfig.tcgs.size(); ++i) {
+				if (info.sampledTexCoords.test(i) && config.shaderConfig.tcgs[i].src == GX_MAX_TEXGENSRC) {
+					valid = false;
+					break;
+				}
+			}
+
+			if (!valid) {
+				Log.warn("Ignoring cached GX pipeline with an uninitialized texture coordinate generator");
+				continue;
+			}
+		}
 
     find_pipeline_impl(type, config, [=] { return create(config); }, PipelinePriority::Background, firstFrameUsed);
     ++acceptedRows;
@@ -1122,12 +1153,16 @@ void initialize_pipeline_cache() {
   g_pipelineThreadEnd = false;
   g_gpuCachePrunePending = false;
 
-  if (webgpu::g_backendType == wgpu::BackendType::WebGPU) {
-    g_hasPipelineThread = false;
-  } else {
-    g_hasPipelineThread = true;
-    g_pipelineThread = std::thread(pipeline_worker);
-  }
+	if (webgpu::g_backendType == wgpu::BackendType::WebGPU) {
+		g_hasPipelineThread = false;
+	} else {
+		g_hasPipelineThread = true;
+		const auto workerCount = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
+
+		for (unsigned int i = 0; i < workerCount; ++i) {
+			g_pipelineThreads.emplace_back(pipeline_worker);
+		}
+	}
 
   const size_t loadedCount = load_pipeline_cache();
   if (!g_pipelineCacheBroken && loadedCount > 0) {
@@ -1140,12 +1175,17 @@ void initialize_pipeline_cache() {
 }
 
 void shutdown_pipeline_cache() {
-  if (g_hasPipelineThread) {
-    g_pipelineThreadEnd = true;
-    g_pipelineQueueCv.notify_all();
-    g_pipelineReadyCv.notify_all();
-    g_pipelineThread.join();
-  }
+	if (g_hasPipelineThread) {
+		g_pipelineThreadEnd = true;
+		g_pipelineQueueCv.notify_all();
+		g_pipelineReadyCv.notify_all();
+
+		for (auto& worker : g_pipelineThreads) {
+			worker.join();
+		}
+
+		g_pipelineThreads.clear();
+	}
   g_hasPipelineThread = false;
 
   stop_pipeline_cache_writer();
@@ -1175,13 +1215,36 @@ void end_pipeline_frame() {
 }
 
 bool get_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline) {
-  std::lock_guard guard{g_pipelineMutex};
-  const auto it = g_pipelines.find(ref);
-  if (it == g_pipelines.end()) {
-    return false;
-  }
-  pipeline = it->second.pipeline;
-  return true;
+	std::unique_lock lock{g_pipelineMutex};
+	auto it = g_pipelines.find(ref);
+	if (it == g_pipelines.end() && g_pendingPipelines.contains(ref)) {
+		if (g_hasPipelineThread) {
+			touch_pending_pipeline(ref, PipelinePriority::Blocking);
+			g_pipelineQueueCv.notify_one();
+			g_pipelineReadyCv.wait(lock, [=] { return g_pipelines.contains(ref) || g_pipelineThreadEnd; });
+		} else {
+			auto pending = take_pending_pipeline(ref);
+			if (pending) {
+				g_pipelines.try_emplace(ref, CachedPipeline{
+					.pipeline = pending->create(),
+					.firstFrameUsed = pending->firstFrameUsed,
+				});
+				++g_pipelinesPerFrame;
+				lock.unlock();
+				notify_pipeline_ready(true);
+				lock.lock();
+			}
+		}
+
+		it = g_pipelines.find(ref);
+	}
+
+	if (it == g_pipelines.end()) {
+		return false;
+	}
+
+	pipeline = it->second.pipeline;
+	return true;
 }
 
 } // namespace aurora::gfx

@@ -133,13 +133,25 @@ void bp_tev_ind(u8 reg, u32 value) noexcept {
 void bp_scissor(u8, u32) noexcept {
   const u32 scis0 = g_gxState.bpRegCache[0x20];
   const u32 scis1 = g_gxState.bpRegCache[0x21];
-  const s32 tp = static_cast<s32>(reg_get(scis0, 11, 0)) - 342;
-  const s32 lf = static_cast<s32>(reg_get(scis0, 11, 12)) - 342;
-  const s32 bm = static_cast<s32>(reg_get(scis1, 11, 0)) - 342;
-  const s32 rt = static_cast<s32>(reg_get(scis1, 11, 12)) - 342;
+  const s32 tp = static_cast<s32>(reg_get(scis0, 11, 0)) - g_gxState.scissorOffsetY;
+  const s32 lf = static_cast<s32>(reg_get(scis0, 11, 12)) - g_gxState.scissorOffsetX;
+  const s32 bm = static_cast<s32>(reg_get(scis1, 11, 0)) - g_gxState.scissorOffsetY;
+  const s32 rt = static_cast<s32>(reg_get(scis1, 11, 12)) - g_gxState.scissorOffsetX;
   const s32 wd = std::max(rt - lf + 1, 0);
   const s32 ht = std::max(bm - tp + 1, 0);
   set_logical_scissor({lf, tp, wd, ht});
+}
+
+void bp_scissor_offset(u8, u32 value) noexcept {
+	const s32 x = static_cast<s32>(reg_get(value, 10, 0)) * 2;
+	const s32 y = static_cast<s32>(reg_get(value, 10, 10)) * 2;
+	auto viewport = g_gxState.logicalViewport;
+	viewport.left += g_gxState.scissorOffsetX - x;
+	viewport.top += g_gxState.scissorOffsetY - y;
+	g_gxState.scissorOffsetX = x;
+	g_gxState.scissorOffsetY = y;
+	set_logical_viewport(viewport);
+	bp_scissor(0, 0);
 }
 
 // Line/point size (0x22)
@@ -438,6 +450,15 @@ void bp_fog_color(u8, u32 value) noexcept {
   };
 }
 
+void bp_z_texture_bias(u8, u32 value) noexcept {
+	g_gxState.zTextureBias = value & 0xFFFFFF;
+}
+
+void bp_z_texture_control(u8, u32 value) noexcept {
+	g_gxState.zTextureFormat = reg_get(value, 2, 0);
+	g_gxState.zTextureOp = reg_get(value, 2, 2);
+}
+
 // Alpha compare (0xF3)
 void bp_alpha_compare(u8, u32 value) noexcept {
   g_gxState.alphaCompare.ref0 = reg_get(value, 8, 0);
@@ -484,6 +505,11 @@ void bp_tex(u8 reg, u32 value) noexcept {
     break;
   case 1: // Mode1
     slot.mode1 = value;
+	if (reg_get(value, 8, 8) != 0) {
+		slot.flags |= 1;
+	} else {
+		slot.flags &= ~1u;
+	}
     break;
   case 2: // Image0
     slot.image0 = value;
@@ -494,6 +520,9 @@ void bp_tex(u8 reg, u32 value) noexcept {
   case 5: // Image3
     slot.image3 = value;
     break;
+  case 6:
+	slot.tlut = static_cast<GXTlut>(reg_get(value, 10, 0));
+	break;
   default:
     break;
   }
@@ -523,6 +552,7 @@ constexpr auto kBpRegs = [] {
   }
   regs[0x20] = {bp_scissor};
   regs[0x21] = {bp_scissor};
+	regs[0x59] = {bp_scissor_offset};
   regs[0x22] = {bp_line_point_size, DirtyUniform};
   regs[0x25] = {bp_ind_scale, DirtyPipeline};
   regs[0x26] = {bp_ind_scale, DirtyPipeline};
@@ -537,6 +567,8 @@ constexpr auto kBpRegs = [] {
   regs[0x41] = {bp_cmode0, DirtyPipeline};
   regs[0x42] = {bp_cmode1, DirtyPipeline};
   regs[0x43] = {bp_pe_ctrl};
+  regs[0x47] = {};
+  regs[0x48] = {};
   regs[0x4F] = {bp_clear_ra};
   regs[0x50] = {bp_clear_bg};
   regs[0x51] = {bp_clear_depth};
@@ -551,7 +583,7 @@ constexpr auto kBpRegs = [] {
       regs[base + 0x0C + i] = {};                      // Image1 (GXTexRegion)
       regs[base + 0x10 + i] = {};                      // Image2 (GXTexRegion)
       regs[base + 0x14 + i] = {bp_tex, DirtyTextures}; // Image3
-      regs[base + 0x18 + i] = {};                      // TLUT region TMEM offset
+      regs[base + 0x18 + i] = {bp_tex, DirtyTextures};                      // TLUT region TMEM offset
     }
   }
   for (u8 r = 0xC0; r <= 0xDE; r += 2) {
@@ -570,6 +602,8 @@ constexpr auto kBpRegs = [] {
   regs[0xF0] = {bp_fog2, DirtyUniform};
   regs[0xF1] = {bp_fog3, DirtyPipeline | DirtyUniform}; // fog.type affects shader
   regs[0xF2] = {bp_fog_color, DirtyUniform};
+	regs[0xF4] = {bp_z_texture_bias, DirtyUniform};
+	regs[0xF5] = {bp_z_texture_control, DirtyPipeline | DirtyUniform};
   regs[0xF3] = {bp_alpha_compare, DirtyPipeline};
   for (u8 r = 0xF6; r <= 0xFD; ++r) {
     regs[r] = {bp_ksel, DirtyPipeline};
@@ -890,8 +924,8 @@ void xf_load_viewport(const u8* data) noexcept {
   f32 width = sx * 2.0f;
   f32 height = -sy * 2.0f;
   set_logical_viewport({
-      .left = ox - 340.0f - width / 2.0f,
-      .top = oy - 340.0f - height / 2.0f,
+      .left = ox + 2.0f - g_gxState.scissorOffsetX - width / 2.0f,
+      .top = oy + 2.0f - g_gxState.scissorOffsetY - height / 2.0f,
       .width = width,
       .height = height,
       .znear = (oz - sz) / 1.6777215e7f,

@@ -1,6 +1,7 @@
 add_library(aurora_wpad STATIC
   lib/revolution/wpad/wpad.cpp
   lib/revolution/wpad/backend.cpp
+  lib/revolution/wenc/wenc.c
 )
 add_library(aurora::wpad ALIAS aurora_wpad)
 set_target_properties(aurora_wpad PROPERTIES FOLDER "aurora")

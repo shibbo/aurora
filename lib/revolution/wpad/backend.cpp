@@ -2,7 +2,6 @@
 #include "../../input.hpp"
 
 #include <SDL3/SDL_timer.h>
-#include <SDL3/SDL_video.h>
 
 namespace aurora::wpad {
 namespace {
@@ -44,13 +43,9 @@ std::array<HostState, WPAD_MAX_CONTROLLERS> read_host() {
 		state.nunchukAcc = acceleration(i, PAD_SENSOR_ACCEL_LEFT);
 	}
 
-	auto* window = SDL_GetMouseFocus();
-	int width = 0, height = 0;
 	float x = 0, y = 0;
-
-	if (window && SDL_GetWindowSize(window, &width, &height) && width > 0 && height > 0 && !result[0].blocked) {
-		SDL_GetMouseState(&x, &y);
-		result[0].pointer = {2 * x / width - 1, 2 * y / height - 1, x >= 0 && y >= 0 && x < width && y < height};
+	if (!result[0].blocked && input::get_mouse_pointer(&x, &y)) {
+		result[0].pointer = {x, y, TRUE};
 	}
 
 	return result;

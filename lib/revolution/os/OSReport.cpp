@@ -25,3 +25,7 @@ void OSPanic(const char* file, int line, const char* message, ...) {
 	fflush(stderr);
 	abort();
 }
+
+void OSRegisterVersion(const char* version) {
+	OSReport("%s\n", version);
+}

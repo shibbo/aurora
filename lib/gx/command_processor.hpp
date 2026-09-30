@@ -9,6 +9,8 @@ namespace aurora::gx::fifo {
 struct ProcessResult {
   uint32_t bytesProcessed;
   bool drawDone;
+  bool drawSync = false;
+  uint16_t token = 0;
 };
 
 // Process GX FIFO commands until the next draw done event or end of buffer

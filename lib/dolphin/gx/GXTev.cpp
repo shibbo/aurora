@@ -169,7 +169,21 @@ void GXSetTevOrder(GXTevStageID id, GXTexCoordID tcid, GXTexMapID tmid, GXChanne
 }
 
 void GXSetZTexture(GXZTexOp op, GXTexFmt fmt, u32 bias) {
-  // TODO
+	u32 type = 2;
+	switch (fmt) {
+	case GX_TF_Z8:
+		type = 0;
+		break;
+	case GX_TF_Z16:
+		type = 1;
+		break;
+	default:
+		break;
+	}
+
+	GX_WRITE_RAS_REG(0xF4000000 | (bias & 0xFFFFFF));
+	GX_WRITE_RAS_REG(0xF5000000 | type | (static_cast<u32>(op) << 2));
+	__gx->bpSent = 1;
 }
 
 void GXSetNumTevStages(u8 num) {

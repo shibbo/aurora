@@ -181,4 +181,6 @@ uint32_t current_frame() noexcept;
 /// code that registered draw types. Callable from the game thread only.
 void synchronize();
 
+void wait_draw_sync();
+
 } // namespace aurora::gfx

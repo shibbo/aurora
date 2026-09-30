@@ -22,9 +22,9 @@ typedef struct {
 } OSMessageQueue;
 
 void OSInitMessageQueue(OSMessageQueue* mq, OSMessage* msgArray, s32 msgCount);
-BOOL OSSendMessage(OSMessageQueue* mq, OSMessage msg, s32 flags);
-BOOL OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, s32 flags);
-BOOL OSJamMessage(OSMessageQueue* mq, OSMessage msg, s32 flags);
+BOOL OSSendMessage(OSMessageQueue* mq, OSMessage msg, s32 flags) OS_THREAD_MAY_THROW;
+BOOL OSReceiveMessage(OSMessageQueue* mq, OSMessage* msg, s32 flags) OS_THREAD_MAY_THROW;
+BOOL OSJamMessage(OSMessageQueue* mq, OSMessage msg, s32 flags) OS_THREAD_MAY_THROW;
 
 #ifdef __cplusplus
 }

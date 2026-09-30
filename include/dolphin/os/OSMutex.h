@@ -19,11 +19,11 @@ typedef struct OSCond {
 } OSCond;
 
 void OSInitMutex(OSMutex* mutex);
-void OSLockMutex(OSMutex* mutex);
+void OSLockMutex(OSMutex* mutex) OS_THREAD_MAY_THROW;
 void OSUnlockMutex(OSMutex* mutex);
 BOOL OSTryLockMutex(OSMutex* mutex);
 void OSInitCond(OSCond* cond);
-void OSWaitCond(OSCond* cond, OSMutex* mutex);
+void OSWaitCond(OSCond* cond, OSMutex* mutex) OS_THREAD_MAY_THROW;
 void OSSignalCond(OSCond* cond);
 
 #ifdef __cplusplus

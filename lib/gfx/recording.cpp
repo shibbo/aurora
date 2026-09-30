@@ -1,6 +1,7 @@
 #include "recording.hpp"
 
 #include "encoding.hpp"
+#include "color_peek.hpp"
 #include "frame.hpp"
 #include "resource_cache.hpp"
 
@@ -1008,6 +1009,20 @@ bool resolve_pass(const ResolveDesc& desc, ResolvedTargets& out) {
 }
 
 bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSize) {
+	gx::fifo::drain();
+	return push_encoder_task_from_fifo(type, payload, payloadSize);
+}
+
+bool queue_draw_sync(uint16_t token, void (*callback)(uint16_t)) {
+	if (!g_recorder.active() || g_recorder.currentRenderPass == UINT32_MAX || g_recorder.inOffscreen) {
+		return false;
+	}
+
+	const auto texture = current_render_passes()[g_recorder.currentRenderPass].copySourceTexture;
+	return color_peek::queue(texture, token, callback);
+}
+
+bool push_encoder_task_from_fifo(EncoderTaskId type, const void* payload, size_t payloadSize) {
   if (type == InvalidEncoderTask) {
     Log.warn("push_encoder_task: invalid encoder task type");
     return false;
@@ -1024,8 +1039,6 @@ bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSi
     Log.warn("push_encoder_task: unregistered encoder task type {:#x}", type);
     return false;
   }
-
-  gx::fifo::drain();
 
   if (!g_recorder.active() || g_recorder.currentRenderPass == UINT32_MAX) {
     Log.warn("push_encoder_task: called outside an active render pass");

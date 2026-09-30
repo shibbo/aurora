@@ -335,6 +335,9 @@ struct GXState {
   Mat4x4<float> proj;
   GXProjectionType projType; // for GXGetProjectionv
   FogState fog;
+	u32 zTextureBias = 0;
+	u8 zTextureOp = GX_ZT_DISABLE;
+	u8 zTextureFormat = 0;
   GXCullMode cullMode = GX_CULL_BACK;
   u8 lineWidth = 0;
   u8 pointSize = 0;
@@ -393,6 +396,8 @@ struct GXState {
   f32 clamp = 0.0f;
 
   // View state
+	s32 scissorOffsetX = 342;
+	s32 scissorOffsetY = 342;
   AuroraViewportPolicy viewportPolicy = AURORA_VIEWPORT_FIT;
   gfx::Viewport logicalViewport{0.f, 0.f, 640.f, 480.f, 0.f, 1.f};
   gfx::Viewport renderViewport{0.f, 0.f, 640.f, 480.f, 0.f, 1.f};
@@ -419,6 +424,7 @@ struct GXState {
   std::array<u32, 0x100> bpRegCache = [] {
     std::array<u32, 0x100> regs{};
     regs[0xFE] = 0x00FFFFFF;
+		regs[0x59] = 171 | (171 << 10);
     return regs;
   }();
   std::bitset<0x100> bpRegValid;
@@ -492,7 +498,10 @@ struct ShaderConfig {
   u8 lineMode : 2 = 0; // 1 = GX_LINES, 2 = GX_LINESTRIP, 3 = GX_POINTS
   u8 fogRangeEnabled : 1 = false;
   u8 pad1 : 5 = 0;
-  u8 pad2 = 0;
+	u8 zTextureOp : 2 = GX_ZT_DISABLE;
+	u8 zTextureFormat : 2 = 0;
+	u8 forceAlphaOne : 1 = false;
+	u8 pad2 : 3 = 0;
   std::array<AttrConfig, MaxVtxAttr> attrs;
   std::array<TevSwap, MaxTevSwap> tevSwapTable;
   std::array<TevStage, MaxTevStages> tevStages;
@@ -527,6 +536,7 @@ struct ShaderInfo {
   std::bitset<MaxIndTexMtxs> usedIndTexMtxs;
   u32 uniformSize = 0;
   bool usesFog : 1 = false;
+	bool usesZTexture : 1 = false;
   bool lightingEnabled : 1 = false;
   u8 lineMode : 2 = 0;
 };

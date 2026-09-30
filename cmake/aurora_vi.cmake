@@ -1,7 +1,9 @@
-add_library(aurora_vi STATIC
-        lib/dolphin/vi/vi.cpp
-)
+if (AURORA_TARGET_RVL)
+	add_library(aurora_vi STATIC lib/revolution/vi/vi.cpp)
+	target_link_libraries(aurora_vi PRIVATE aurora::os)
+else ()
+	add_library(aurora_vi STATIC lib/dolphin/vi/vi.cpp)
+endif ()
 add_library(aurora::vi ALIAS aurora_vi)
 set_target_properties(aurora_vi PROPERTIES FOLDER "aurora")
-
 target_link_libraries(aurora_vi PUBLIC aurora::core)

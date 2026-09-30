@@ -105,6 +105,8 @@ void GDSetTexLookupMode(GXTexMapID id, GXTexWrapMode wrap_s,
 
 void GDSetTexImgAttr(GXTexMapID id, u16 width, u16 height, GXTexFmt format);
 void GDSetTexImgPtr(GXTexMapID id, void* image_ptr);
+void GDSetTexImgPtrNative(GXTexMapID id, const void* image_ptr);
+void GDLoadTlutNative(const void* data, GXTlut name, GXTlutFmt format, u16 entries);
 void GDSetTexImgPtrRaw(GXTexMapID id, u32 image_ptr_raw);
 void GDPatchTexImgPtr(void* image_ptr);
 void GDSetTexCached(GXTexMapID id, u32 tmem_even, GXTexCacheSize size_even,

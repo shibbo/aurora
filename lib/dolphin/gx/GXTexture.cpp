@@ -5,6 +5,7 @@
 #include "dolphin/gx/GXAurora.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "tracy/Tracy.hpp"
 
@@ -201,6 +202,73 @@ void GXInitTexObjUserData(GXTexObj* obj_, void* userData) {
 void* GXGetTexObjUserData(const GXTexObj* obj_) {
   const auto* obj = reinterpret_cast<const GXTexObj_*>(obj_);
   return const_cast<void*>(obj->userData);
+}
+
+void GXGetTexObjAll(const GXTexObj* obj_, void** image, u16* width, u16* height, GXTexFmt* format,
+	GXTexWrapMode* wrapS, GXTexWrapMode* wrapT, GXBool* mipmap) {
+	const auto* obj = reinterpret_cast<const GXTexObj_*>(obj_);
+	*image = const_cast<void*>(obj->data);
+	*width = obj->mWidth;
+	*height = obj->mHeight;
+	*format = static_cast<GXTexFmt>(obj->mFormat);
+	*wrapS = static_cast<GXTexWrapMode>(obj->mode0 & 3);
+	*wrapT = static_cast<GXTexWrapMode>((obj->mode0 >> 2) & 3);
+	*mipmap = static_cast<GXBool>(obj->flags & 1);
+}
+
+void GXGetTexObjLODAll(const GXTexObj* obj_, GXTexFilter* minFilter, GXTexFilter* magFilter,
+	f32* minLOD, f32* maxLOD, f32* lodBias, GXBool* biasClamp, GXBool* edgeLOD, GXAnisotropy* aniso) {
+	const auto* obj = reinterpret_cast<const GXTexObj_*>(obj_);
+	const u32 filter = (obj->mode0 >> 5) & 7;
+	*minFilter = GX_NEAR;
+
+	for (u32 i = 0; i < 6; ++i) {
+		if (GX2HWFiltConv[i] == filter) {
+			*minFilter = static_cast<GXTexFilter>(i);
+			break;
+		}
+	}
+
+	*magFilter = static_cast<GXTexFilter>((obj->mode0 >> 4) & 1);
+	*minLOD = static_cast<f32>(obj->mode1 & 255) / 16.0f;
+	*maxLOD = static_cast<f32>((obj->mode1 >> 8) & 255) / 16.0f;
+	*lodBias = static_cast<f32>(static_cast<s8>((obj->mode0 >> 9) & 255)) / 32.0f;
+	*biasClamp = static_cast<GXBool>((obj->mode0 >> 21) & 1);
+	*edgeLOD = static_cast<GXBool>(((obj->mode0 >> 8) & 1) == 0);
+	*aniso = static_cast<GXAnisotropy>((obj->mode0 >> 19) & 3);
+}
+
+void GXInitTexCacheRegion(GXTexRegion* region, GXBool is32bMipmap, u32 tmemEven, GXTexCacheSize sizeEven,
+	u32 tmemOdd, GXTexCacheSize sizeOdd) {
+	auto exponent = [](GXTexCacheSize size) -> u32 {
+		switch (size) {
+		case GX_TEXCACHE_32K:
+			return 3;
+		case GX_TEXCACHE_128K:
+			return 4;
+		case GX_TEXCACHE_512K:
+			return 5;
+		default:
+			return 0;
+		}
+	};
+
+	struct Region {
+		u32 image1;
+		u32 image2;
+		u16 sizeEven;
+		u16 sizeOdd;
+		u8 is32bMipmap;
+		u8 isCached;
+		u8 padding[2];
+	};
+
+	const u32 even = exponent(sizeEven);
+	const u32 odd = exponent(sizeOdd);
+	const Region value{((tmemEven >> 5) & 0x7fff) | (even << 15) | (even << 18),
+		((tmemOdd >> 5) & 0x7fff) | (odd << 15) | (odd << 18), 0, 0, is32bMipmap, GX_TRUE, {0, 0}};
+	static_assert(sizeof(value) == sizeof(*region));
+	std::memcpy(region, &value, sizeof(value));
 }
 
 void GXLoadTexObj(GXTexObj* obj_, GXTexMapID id) {

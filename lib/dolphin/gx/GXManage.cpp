@@ -163,7 +163,9 @@ GXFifoObj* GXInit(void* base, u32 size) {
   GXSetCullMode(GX_CULL_BACK);
   GXSetClipMode(GX_CLIP_ENABLE);
   GXSetScissor(0, 0, rmode->fbWidth, rmode->efbHeight);
-  // GXSetScissorBoxOffset(0, 0);
+#ifdef RVL
+	GXSetScissorBoxOffset(0, 0);
+#endif
 
   GXSetNumChans(0);
   GXSetChanCtrl(GX_COLOR0A0, GX_DISABLE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
@@ -271,6 +273,40 @@ void GXSetDrawDone() {
   GXFlush();
   GX_WRITE_RAS_REG(kDrawDoneCommand);
   aurora::gx::fifo::publish();
+}
+
+void GXSetMisc(GXMiscToken token, u32 value) {
+	switch (token) {
+	case GX_MT_XF_FLUSH:
+		__gx->vNum = static_cast<u16>(value);
+		__gx->bpSent = 1;
+
+		if (__gx->vNum != 0) {
+			__gx->dirtyState |= 8;
+		}
+
+		break;
+	case GX_MT_DL_SAVE_CONTEXT:
+		__gx->dlSaveContext = value != 0;
+		break;
+	default:
+		break;
+	}
+}
+
+GXDrawSyncCallback GXSetDrawSyncCallback(GXDrawSyncCallback callback) {
+	return aurora::gx::fifo::set_draw_sync_callback(callback);
+}
+
+void GXSetDrawSync(u16 token) {
+	GXFlush();
+	GX_WRITE_RAS_REG(0x48000000u | token);
+	GX_WRITE_RAS_REG(0x47000000u | token);
+	aurora::gx::fifo::publish();
+}
+
+u16 GXReadDrawSync() {
+	return aurora::gx::fifo::draw_sync_token();
 }
 
 GXDrawDoneCallback GXSetDrawDoneCallback(GXDrawDoneCallback cb) { return aurora::gx::fifo::set_draw_done_callback(cb); }

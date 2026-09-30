@@ -469,12 +469,29 @@ void initialize() noexcept {
                 "Failed to initialize SDL subsystems: {}", SDL_GetError());
 }
 
-struct MouseScrollStatus {
+struct MouseStatus {
   float scrollX;
   float scrollY;
+  float pointerX;
+  float pointerY;
+  bool pointerValid;
 };
 
-static MouseScrollStatus g_MouseStatus;
+static MouseStatus g_MouseStatus;
+
+void set_mouse_pointer(float x, float y, bool valid) noexcept {
+	g_MouseStatus.pointerX = x;
+	g_MouseStatus.pointerY = y;
+	g_MouseStatus.pointerValid = valid;
+}
+
+
+bool get_mouse_pointer(float* x, float* y) noexcept {
+	*x = g_MouseStatus.pointerX;
+	*y = g_MouseStatus.pointerY;
+	return g_MouseStatus.pointerValid;
+}
+
 
 void set_mouse_scroll(const float scrollX, const float scrollY) noexcept {
   g_MouseStatus.scrollX = scrollX;
@@ -487,6 +504,8 @@ void get_mouse_scroll(float* scrollX, float* scrollY) noexcept {
 }
 
 void shutdown() noexcept {
+	set_mouse_pointer(0, 0, false);
+
   if (g_wpadShutdown) {
     g_wpadShutdown();
   }

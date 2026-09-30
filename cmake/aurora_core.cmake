@@ -1,5 +1,9 @@
 add_library(aurora_core STATIC
         lib/aurora.cpp
+        lib/audio.cpp
+        lib/audio.hpp
+        lib/video.cpp
+        lib/video.hpp
         lib/device.cpp
         lib/device.hpp
         lib/input.cpp

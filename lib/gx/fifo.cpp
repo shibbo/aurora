@@ -2,6 +2,7 @@
 
 #include "../thread.hpp"
 #include "command_processor.hpp"
+#include "../gfx/recording.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -36,6 +37,16 @@ std::mutex sBufferMutex;
 std::atomic<uint32_t> sWorkerWake{0};
 thread::Thread sWorkerThread;
 std::atomic<DrawDoneCallback> sDrawDoneCallback{nullptr};
+std::atomic<DrawSyncCallback> sDrawSyncCallback{nullptr};
+std::atomic<uint16_t> sDrawSyncToken{0};
+
+void dispatch_draw_sync(uint16_t token) {
+	sDrawSyncToken.store(token, std::memory_order_release);
+	const auto callback = sDrawSyncCallback.load(std::memory_order_acquire);
+	if (callback != nullptr) {
+		callback(token);
+	}
+}
 
 void dispatch_draw_done() noexcept {
   if (const auto callback = sDrawDoneCallback.load(std::memory_order_acquire); callback != nullptr) {
@@ -64,6 +75,13 @@ void process_to(uint64_t target, std::memory_order order) noexcept {
     AURORA_ASSERT(result.bytesProcessed > 0 && result.bytesProcessed <= target - processed,
                   "FIFO processor made invalid progress: processed {} of {} remaining bytes", result.bytesProcessed,
                   target - processed);
+    if (result.drawSync) {
+      if (sDrawSyncCallback.load(std::memory_order_acquire) == nullptr ||
+          !gfx::queue_draw_sync(result.token, dispatch_draw_sync)) {
+        dispatch_draw_sync(result.token);
+      }
+    }
+
     if (result.drawDone) {
       dispatch_draw_done();
     }
@@ -184,6 +202,14 @@ void publish() noexcept {
       process_to(target, std::memory_order_relaxed);
     }
   }
+}
+
+DrawSyncCallback set_draw_sync_callback(DrawSyncCallback callback) noexcept {
+	return sDrawSyncCallback.exchange(callback, std::memory_order_acq_rel);
+}
+
+uint16_t draw_sync_token() noexcept {
+	return sDrawSyncToken.load(std::memory_order_acquire);
 }
 
 DrawDoneCallback set_draw_done_callback(DrawDoneCallback callback) noexcept {

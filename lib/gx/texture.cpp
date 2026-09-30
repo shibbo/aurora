@@ -844,6 +844,9 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
     }
 
     GXTexObj_ obj = g_gxState.loadedTextures[i];
+		if (obj.format() == GX_TF_Z8 || obj.format() == GX_TF_Z16 || obj.format() == GX_TF_Z24X8) {
+			obj.mFormat &= 0xF;
+		}
     auto& textureBind = g_gxState.textures[i];
     if (textureBind.generation == s_bindGeneration && obj.texObjId != 0 &&
         obj.texObjId == textureBind.texObj.texObjId && obj.texDataVersion == textureBind.texObj.texDataVersion) {

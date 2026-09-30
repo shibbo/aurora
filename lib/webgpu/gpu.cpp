@@ -52,6 +52,7 @@ TextureWithSampler g_depthBuffer;
 // EFB -> XFB copy pipeline
 static wgpu::BindGroupLayout g_CopyBindGroupLayout;
 wgpu::RenderPipeline g_CopyPipeline;
+wgpu::RenderPipeline g_CopyDimmedPipeline;
 wgpu::RenderPipeline g_CopyPremultipliedAlphaPipeline;
 wgpu::BindGroup g_CopyBindGroup;
 static AuroraSampler g_Resampler = SAMPLER_BILINEAR;
@@ -520,6 +521,19 @@ fn fs_premultiplied_alpha(in: VertexOutput) -> @location(0) vec4<f32> {
     return g_device.CreateRenderPipeline(&pipelineDescriptor);
   };
   g_CopyPipeline = make_copy_pipeline("XFB Copy Pipeline", "fs_opaque", nullptr);
+  const wgpu::BlendState dimmingBlend{
+	.color = {
+		.operation = wgpu::BlendOperation::Add,
+		.srcFactor = wgpu::BlendFactor::Constant,
+		.dstFactor = wgpu::BlendFactor::Zero,
+	},
+	.alpha = {
+		.operation = wgpu::BlendOperation::Add,
+		.srcFactor = wgpu::BlendFactor::One,
+		.dstFactor = wgpu::BlendFactor::Zero,
+	},
+  };
+  g_CopyDimmedPipeline = make_copy_pipeline("XFB Dimmed Copy Pipeline", "fs_opaque", &dimmingBlend);
 
   const wgpu::BlendState premultipliedAlphaBlend{
       .color =
@@ -1060,6 +1074,7 @@ void shutdown() {
   gpu_prof::shutdown();
   g_CopyBindGroupLayout = {};
   g_CopyPipeline = {};
+  g_CopyDimmedPipeline = {};
   g_CopyPremultipliedAlphaPipeline = {};
   g_CopyBindGroup = {};
   g_ResampleBindGroupLayout = {};

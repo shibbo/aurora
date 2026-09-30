@@ -317,9 +317,11 @@ TEST_F(WpadTest, UnsupportedSpeakerAndRumbleForwarding) {
 	EXPECT_EQ(results.back().second, WPAD_ERR_INVALID);
 }
 
-TEST_F(WpadTest, PointerFilteringValidityAndAccelerationAxes) {
+TEST_F(WpadTest, ScreenPointerValidityAndAccelerationAxes) {
 	KPADInit();
 	host[0].pad.err = PAD_ERR_NONE;
+	KPADSetSensorHeight(0, 0.35f);
+	KPADSetPosParam(0, 0.03f, 0.5f);
 	AuroraWpadPointer pointer{-1, -1, TRUE};
 	Vec accel{0.5f, -1, 0.25f};
 	aurora_wpad_set_pointer(0, &pointer);
@@ -342,8 +344,8 @@ TEST_F(WpadTest, PointerFilteringValidityAndAccelerationAxes) {
 	aurora_wpad_set_pointer(0, &pointer);
 	advance();
 	sample = latest();
-	EXPECT_FLOAT_EQ(sample.pos.x, 0);
-	EXPECT_FLOAT_EQ(sample.pos.y, 0);
+	EXPECT_FLOAT_EQ(sample.pos.x, 1);
+	EXPECT_FLOAT_EQ(sample.pos.y, 1);
 	pointer.valid = FALSE;
 	aurora_wpad_set_pointer(0, &pointer);
 	advance();

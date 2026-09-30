@@ -1,0 +1,17 @@
+if (MSVC AND AURORA_OPTIMIZE_GX_DEBUG)
+	string(REGEX REPLACE "(^| )[/-]RTC[^ ]*" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+	foreach (flag Od Ob0)
+		string(REGEX REPLACE "(^| )[/-]${flag}( |$)" " " CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+	endforeach ()
+endif ()
+
+include(../../cmake/aurora_gx.cmake)
+
+if (AURORA_OPTIMIZE_GX_DEBUG)
+	if (MSVC)
+		set_property(TARGET aurora_gx PROPERTY MSVC_RUNTIME_CHECKS "")
+		target_compile_options(aurora_gx PRIVATE $<$<CONFIG:Debug>:/O2> $<$<CONFIG:Debug>:/Ob2>)
+	else ()
+		target_compile_options(aurora_gx PRIVATE $<$<CONFIG:Debug>:-O2>)
+	endif ()
+endif ()

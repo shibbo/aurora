@@ -366,7 +366,13 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
 
   const auto& vtxFmt = g_gxState.vtxFmts[fmt];
   config.shaderConfig = {};
+	config.shaderConfig.forceAlphaOne = !g_gxState.colorUpdate && g_gxState.alphaUpdate &&
+		g_gxState.dstAlpha != UINT32_MAX && g_gxState.dstAlpha != 0;
   config.shaderConfig.fogType = g_gxState.fog.type;
+	config.shaderConfig.zTextureOp = g_gxState.zTextureOp;
+	if (g_gxState.zTextureOp != GX_ZT_DISABLE) {
+		config.shaderConfig.zTextureFormat = g_gxState.zTextureFormat;
+	}
   config.shaderConfig.fogRangeEnabled = g_gxState.fog.rangeEnabled;
   u8 vtxOffset = 0;
   for (int i = GX_VA_PNMTXIDX; i <= GX_VA_TEX7; ++i) {

@@ -6,6 +6,20 @@
 extern "C" {
 #endif
 
+typedef void (*OSPowerCallback)(void);
+OSPowerCallback OSSetPowerCallback(OSPowerCallback callback);
+#ifdef __cplusplus
+void OSRestart(u32 code) noexcept(false);
+void OSReturnToMenu(void) noexcept(false);
+void OSRebootSystem(void) noexcept(false);
+void OSShutdownSystem(void) noexcept(false);
+#else
+void OSRestart(u32 code);
+void OSReturnToMenu(void);
+void OSRebootSystem(void);
+void OSShutdownSystem(void);
+#endif
+
 void* OSGetMEM1ArenaLo(void);
 void* OSGetMEM1ArenaHi(void);
 void OSSetMEM1ArenaLo(void* newLo);

@@ -62,6 +62,9 @@ void set_wpad_hooks(void (*update)(), void (*shutdown)()) noexcept;
 void persist_controller_for_player(uint32_t player, const GameController* controller) noexcept;
 extern absl::flat_hash_map<Uint32, GameController> g_GameControllers;
 
+void set_mouse_pointer(float x, float y, bool valid) noexcept;
+bool get_mouse_pointer(float* x, float* y) noexcept;
+
 void set_mouse_scroll(float scrollX, float scrollY) noexcept;
 void get_mouse_scroll(float* scrollX, float* scrollY) noexcept;
 

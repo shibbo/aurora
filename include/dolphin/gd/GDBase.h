@@ -146,6 +146,32 @@ inline static void GDWriteAuroraCmd(u16 subCommand) {
   GDWrite_u16(subCommand);
 }
 
+inline static void GDBegin(GXPrimitive primitive, GXVtxFmt format, u16 count) {
+	GDWrite_u8(static_cast<u8>(primitive) | static_cast<u8>(format));
+	GDWrite_u16(count);
+}
+
+inline static void GDEnd() {
+}
+
+inline static void GDPosition3f32(f32 x, f32 y, f32 z) {
+	GDWrite_f32(x);
+	GDWrite_f32(y);
+	GDWrite_f32(z);
+}
+
+inline static void GDColor4u8(u8 r, u8 g, u8 b, u8 a) {
+	GDWrite_u8(r);
+	GDWrite_u8(g);
+	GDWrite_u8(b);
+	GDWrite_u8(a);
+}
+
+inline static void GDTexCoord2f32(f32 s, f32 t) {
+	GDWrite_f32(s);
+	GDWrite_f32(t);
+}
+
 inline static void GDSetCurrent(GDLObj* dl) {
     __GDCurrentDL = dl;
 }

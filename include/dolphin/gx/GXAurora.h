@@ -79,6 +79,10 @@ extern "C" {
 
 #define GX_AURORA_END_OFFSCREEN 0x003A
 
+#define GX_AURORA_LOAD_TEX_POINTER 0x003B
+
+#define GX_AURORA_LOAD_TLUT_POINTER 0x003C
+
 /**
  * Draw primitives with the vertex count derived from a byte length, as written by
  * GXBegin(prim, fmt, GX_AUTO). Must be followed by a u8 draw opcode (vtxfmt|prim),

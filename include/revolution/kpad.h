@@ -54,6 +54,7 @@ void KPADReset(void);
 s32 KPADRead(s32 chan, KPADStatus* samples, u32 count);
 void KPADSetBtnRepeat(s32 chan, f32 delay, f32 pulse);
 void KPADSetSensorHeight(s32 chan, f32 height);
+void KPADSetAccParam(s32 chan, f32 radius, f32 sensitivity);
 void KPADSetPosParam(s32 chan, f32 radius, f32 sensitivity);
 void KPADSetHoriParam(s32 chan, f32 radius, f32 sensitivity);
 void KPADSetDistParam(s32 chan, f32 radius, f32 sensitivity);

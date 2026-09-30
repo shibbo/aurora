@@ -868,14 +868,20 @@ auto lighting_func(const ShaderConfig& config, const ColorChannelConfig& cc, u8 
 }
 
 absl::flat_hash_set<gfx::ShaderRef> s_seenShaders;
+std::mutex s_seenShadersMutex;
+
+bool is_new_shader(gfx::ShaderRef hash) {
+	std::lock_guard lock{s_seenShadersMutex};
+	return s_seenShaders.insert(hash).second;
+}
+
 } // namespace
 
 std::string build_shader_source(const ShaderConfig& config) noexcept {
   ZoneScoped;
   const auto hash = xxh3_hash(config);
   const auto info = build_shader_info(config);
-  if (EnableDebugPrints && !s_seenShaders.contains(hash)) {
-    s_seenShaders.insert(hash);
+  if (EnableDebugPrints && is_new_shader(hash)) {
 
     Log.info("Shader config (hash {:x}):", hash);
     {
@@ -1348,7 +1354,8 @@ std::string build_shader_source(const ShaderConfig& config) noexcept {
     const bool hasIndirectStage = stage.indTexStage < config.numIndStages;
     const bool needsTevTexCoord =
         needsIndirectCoord || stage.indTexWrapS != GX_ITW_OFF || stage.indTexWrapT != GX_ITW_OFF || stage.indTexAddPrev;
-    const bool needsTextureSample = uses_texture_sample(stage);
+    const bool needsTextureSample = uses_texture_sample(stage) ||
+		(config.zTextureOp != GX_ZT_DISABLE && i == config.tevStageCount - 1);
     if (!needsTevTexCoord && !needsTextureSample) {
       continue;
     }
@@ -1521,6 +1528,42 @@ std::string build_shader_source(const ShaderConfig& config) noexcept {
   if (info.usesPTTexMtx.any()) {
     uniBufAttrs += fmt::format("\n    postmtx: array<mat3x4f, {}>,", MaxPTTexMtx);
   }
+	std::string fragmentResultType = "@location(0) vec4f";
+	std::string fragmentReturn = "prev";
+	std::string fogDepth = "in.pos.z";
+	if (UseReversedZ) {
+		fogDepth = "(1.0 - in.pos.z)";
+	}
+
+	if (info.usesZTexture) {
+		uniformPre += "\nstruct FragmentOutput {\n    @location(0) color: vec4f,\n    @builtin(frag_depth) depth: f32,\n}";
+		fragmentResultType = "FragmentOutput";
+		fragmentFn += fmt::format("\n    let zTexel = vec4u(round(clamp(sampled{}, vec4f(0.0), vec4f(1.0)) * 255.0));", config.tevStageCount - 1);
+		switch (config.zTextureFormat) {
+		case 0:
+			fragmentFn += "\n    var zValue = zTexel.a;";
+			break;
+		case 1:
+			fragmentFn += "\n    var zValue = (zTexel.a << 8u) | zTexel.r;";
+			break;
+		default:
+			fragmentFn += "\n    var zValue = (zTexel.r << 16u) | (zTexel.g << 8u) | zTexel.b;";
+			break;
+		}
+
+		fragmentFn += "\n    zValue += ubuf.z_texture.x;";
+		if (config.zTextureOp == GX_ZT_ADD) {
+			fragmentFn += fmt::format("\n    zValue += u32(clamp({}, 0.0, 1.0) * 16777215.0);", fogDepth);
+		}
+
+		fragmentFn += "\n    let zDepth = f32(zValue & 0xFFFFFFu) / 16777215.0;";
+		fogDepth = "zDepth";
+		fragmentReturn = "FragmentOutput(prev, zDepth)";
+		if (UseReversedZ) {
+			fragmentReturn = "FragmentOutput(prev, 1.0 - zDepth)";
+		}
+	}
+
   if (info.usesFog) {
     uniformPre +=
         "\n"
@@ -1534,7 +1577,7 @@ std::string build_shader_source(const ShaderConfig& config) noexcept {
         "}";
     uniBufAttrs += "\n    fog: Fog,";
 
-    const std::string_view fogDepth = UseReversedZ ? "(1.0 - in.pos.z)" : "in.pos.z";
+
     if ((config.fogType & 0x08) != 0) {
       fragmentFn += fmt::format("\n    // Orthographic fog\n    var fogBase = ubuf.fog.a * {};", fogDepth);
     } else {
@@ -1572,6 +1615,9 @@ std::string build_shader_source(const ShaderConfig& config) noexcept {
     }
     fragmentFn += "\n    prev = vec4f(mix(prev.rgb, ubuf.fog.color.rgb, clamp(fogZ, 0.0, 1.0)), prev.a);";
   }
+	if (info.usesZTexture) {
+		uniBufAttrs += "\n    z_texture: vec4u,";
+	}
   uniBufAttrs += fmt::format("\n    texcoord_scale: array<vec4f, {}>,", MaxTexCoord);
   if (info.usedIndTexMtxs.any()) {
     uniBufAttrs += fmt::format("\n    ind_mtx: array<mat2x4f, {}>,", MaxIndTexMtxs);
@@ -1627,6 +1673,9 @@ std::string build_shader_source(const ShaderConfig& config) noexcept {
   if constexpr (EnableNormalVisualization) {
     fragmentFn += "\n    prev = vec4f(in.nrm, prev.a);";
   }
+	if (config.forceAlphaOne) {
+		fragmentFn += "\n    prev.a = 1.0;";
+	}
 
   const auto shaderSource = fmt::format(R"""(
 fn bswap32(v: u32, le: bool) -> u32 {{
@@ -1992,12 +2041,12 @@ fn vs_main(
 }}
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4f {{{6}{5}
-    return prev;
+fn fs_main(in: VertexOutput) -> {9} {{{6}{5}
+    return {10};
 }}
 )""",
                                         uniBufAttrs, texBindings, vtxOutAttrs, vtxInAttrs, vtxXfrAttrs, fragmentFn,
-                                        fragmentFnPre, vtxXfrAttrsPre, uniformPre);
+                                        fragmentFnPre, vtxXfrAttrsPre, uniformPre, fragmentResultType, fragmentReturn);
   if (EnableDebugPrints) {
     Log.info("Generated shader (hash {:x}): {}", hash, shaderSource);
   }

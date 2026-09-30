@@ -10,3 +10,7 @@ add_library(aurora::mtx ALIAS aurora_mtx)
 set_target_properties(aurora_mtx PROPERTIES FOLDER "aurora")
 
 target_include_directories(aurora_mtx PUBLIC include)
+
+if(AURORA_TARGET_RVL)
+	target_sources(aurora_mtx PRIVATE lib/revolution/mtx/mtx44.c)
+endif()

@@ -5,7 +5,6 @@
 #include "../../gfx/texture.hpp"
 #include "../../gfx/recording.hpp"
 #include "../../window.hpp"
-#include "../../gfx/clear.hpp"
 #include "../../webgpu/gpu.hpp"
 #include "../../gx/texture.hpp"
 #include "../vi/vi_internal.hpp"
@@ -62,18 +61,6 @@ void copy_tex(const void* dest, GXBool clear) noexcept {
   }
   auto& handle = it->second;
 
-  if (g_gxState.alphaUpdate && g_gxState.dstAlpha != UINT32_MAX) {
-    if (!clear) {
-      // TODO: figure out the right behavior here.
-      // should the copy have a specific alpha value but the EFB remains untouched?
-    }
-    // Overwrite alpha before resolving
-    gfx::push_draw_command(gfx::clear::DrawData{
-        .pipeline =
-            gfx::pipeline_ref(gfx::clear::make_pipeline_config(gfx::get_render_target_layout(), false, true, false)),
-        .color = wgpu::Color{0.f, 0.f, 0.f, g_gxState.dstAlpha / 255.f},
-    });
-  }
   const auto clearColor = clear && g_gxState.colorUpdate;
   const auto clearAlpha = clear && g_gxState.alphaUpdate;
   const auto clearDepth = clear && g_gxState.depthUpdate;
@@ -176,7 +163,10 @@ void GXSetTexCopyDst(u16 wd, u16 ht, GXTexFmt fmt, GXBool mipmap) {
 }
 
 // TODO GXSetDispCopyFrame2Field
-// TODO GXSetCopyClamp
+void GXSetCopyClamp(GXFBClamp clamp) {
+	SET_REG_FIELD(0, __gx->cpTex, 1, 0, (clamp & GX_CLAMP_TOP) != 0);
+	SET_REG_FIELD(0, __gx->cpTex, 1, 1, (clamp & GX_CLAMP_BOTTOM) != 0);
+}
 
 u32 GXSetDispCopyYScale(f32 vscale) { return 0; }
 
@@ -220,8 +210,61 @@ void GXCopyTex(void* dest, GXBool clear) {
   aurora::gx::fifo::publish();
 }
 
-// TODO GXGetYScaleFactor
-// TODO GXGetNumXfbLines
+static u32 getXfbLines(u32 height, u32 scale) {
+	if (height == 0 || scale == 0) {
+		return 0;
+	}
+
+	u32 lines = (height - 1) * 256 / scale + 1;
+	if (scale > 128 && scale < 256) {
+		while ((scale & 1) == 0) {
+			scale >>= 1;
+		}
+
+		if (height % scale == 0) {
+			++lines;
+		}
+	}
+
+	if (lines > 1024) {
+		lines = 1024;
+	}
+
+	return lines;
+}
+
+u16 GXGetNumXfbLines(u16 efbHeight, f32 yScale) {
+	if (!(yScale >= 1.0f && yScale <= 256.0f)) {
+		return 0;
+	}
+
+	return static_cast<u16>(getXfbLines(efbHeight, static_cast<u32>(256.0f / yScale) & 511));
+}
+
+f32 GXGetYScaleFactor(u16 efbHeight, u16 xfbHeight) {
+	if (efbHeight == 0 || xfbHeight < efbHeight || xfbHeight > 1024) {
+		return 1.0f;
+	}
+
+	u32 target = xfbHeight;
+	f32 scale = static_cast<f32>(target) / efbHeight;
+	u32 lines = getXfbLines(efbHeight, static_cast<u32>(256.0f / scale) & 511);
+	while (lines > xfbHeight && target > 1) {
+		--target;
+		scale = static_cast<f32>(target) / efbHeight;
+		lines = getXfbLines(efbHeight, static_cast<u32>(256.0f / scale) & 511);
+	}
+
+	f32 result = scale;
+	while (lines < xfbHeight && target < static_cast<u32>(efbHeight) * 256) {
+		result = scale;
+		++target;
+		scale = static_cast<f32>(target) / efbHeight;
+		lines = getXfbLines(efbHeight, static_cast<u32>(256.0f / scale) & 511);
+	}
+
+	return result;
+}
 // TODO GXClearBoundingBox
 // TODO GXReadBoundingBox
 }

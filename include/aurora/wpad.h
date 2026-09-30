@@ -11,6 +11,7 @@ extern "C" {
 /* Call on the input thread, as with PAD. aurora_update samples automatically. */
 void aurora_wpad_update(void);
 void aurora_wpad_shutdown(void);
+BOOL aurora_wpad_set_face_data(s32 chan, const void* data, u16 size);
 /* Select the emulated extension independently of the host controller type. */
 BOOL aurora_wpad_set_device(s32 chan, u32 device);
 /* Re-enable a channel disabled by WPADDisconnect. Physical reconnection also re-enables it. */

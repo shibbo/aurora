@@ -50,6 +50,9 @@ struct ColorPassDescriptor {
   uint32_t stencilClearValue = 0;
 };
 
+bool push_encoder_task_from_fifo(EncoderTaskId type, const void* payload, size_t payloadSize);
+bool queue_draw_sync(uint16_t token, void (*callback)(uint16_t));
+
 void finish();
 void begin_color_pass(const ColorPassDescriptor& desc);
 void end_color_pass();

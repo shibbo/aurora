@@ -19,7 +19,7 @@ struct Channel {
 	u32 index = 0, count = 0;
 	float delay = 0, pulse = 0, sensorHeight = 0;
 	double nextRepeat = 0, nextClassicRepeat = 0;
-	Filter pos, horizon, dist;
+	Filter pos, horizon, dist, acc;
 	bool hasPrevious = false;
 };
 
@@ -108,24 +108,33 @@ void sample(s32 chan, const aurora::wpad::Sample& raw) {
 			channel.nextRepeat);
 
 	if (connected) {
-		status.acc = acceleration(raw.core.accX, raw.core.accY, raw.core.accZ);
+		const Vec rawAcc = acceleration(raw.core.accX, raw.core.accY, raw.core.accZ);
+		Vec previousAcc{0, -1, 0};
+
+		if (previous) {
+			previousAcc = old.acc;
+		}
+
+		status.acc = {filtered(previousAcc.x, rawAcc.x, channel.acc),
+			filtered(previousAcc.y, rawAcc.y, channel.acc),
+			filtered(previousAcc.z, rawAcc.z, channel.acc)};
 		status.acc_value = length(status.acc);
 
 		if (previous) {
 			status.acc_speed = length(difference(status.acc, old.acc));
 		}
 
-		const float vertical = std::hypot(status.acc.y, status.acc.z);
+		const float vertical = std::hypot(rawAcc.y, rawAcc.z);
 
 		if (vertical > 0) {
-			status.acc_vertical = {-status.acc.z / vertical, -status.acc.y / vertical};
+			status.acc_vertical = {-rawAcc.z / vertical, -rawAcc.y / vertical};
 		}
 
-		const float roll = std::hypot(status.acc.x, status.acc.y);
+		const float roll = std::hypot(rawAcc.x, rawAcc.y);
 		Vec2 horizon{1, 0};
 
 		if (roll > 0) {
-			horizon = {-status.acc.y / roll, status.acc.x / roll};
+			horizon = {-rawAcc.y / roll, rawAcc.x / roll};
 		}
 
 		status.horizon = horizon;
@@ -138,13 +147,12 @@ void sample(s32 chan, const aurora::wpad::Sample& raw) {
 		}
 
 		if (raw.pointer.valid) {
-			const Vec2 pos{raw.pointer.x, raw.pointer.y + channel.sensorHeight};
+			const Vec2 pos{raw.pointer.x, raw.pointer.y};
 			const bool tracked = previous && old.dpd_valid_fg;
 			status.pos = pos;
 			status.dist = 1.f;
 
 			if (tracked) {
-				status.pos = {filtered(old.pos.x, pos.x, channel.pos), filtered(old.pos.y, pos.y, channel.pos)};
 				status.dist = filtered(old.dist, 1.f, channel.dist);
 			}
 
@@ -162,7 +170,16 @@ void sample(s32 chan, const aurora::wpad::Sample& raw) {
 			raw.format <= WPAD_FMT_FREESTYLE_ACC_DPD) {
 			auto& fs = status.ex_status.fs;
 			fs.stick = stick(raw.fs.fsStickX, raw.fs.fsStickY, 71.f);
-			fs.acc = acceleration(raw.fs.fsAccX, raw.fs.fsAccY, raw.fs.fsAccZ);
+			const Vec rawFsAcc = acceleration(raw.fs.fsAccX, raw.fs.fsAccY, raw.fs.fsAccZ);
+			Vec previousFsAcc{0, -1, 0};
+
+			if (previous && old.dev_type == WPAD_DEV_FREESTYLE) {
+				previousFsAcc = old.ex_status.fs.acc;
+			}
+
+			fs.acc = {filtered(previousFsAcc.x, rawFsAcc.x, channel.acc),
+				filtered(previousFsAcc.y, rawFsAcc.y, channel.acc),
+				filtered(previousFsAcc.z, rawFsAcc.z, channel.acc)};
 			fs.acc_value = length(fs.acc);
 
 			if (previous && old.dev_type == WPAD_DEV_FREESTYLE) {
@@ -264,6 +281,12 @@ void KPADSetBtnRepeat(s32 chan, f32 delay, f32 pulse) {
 void KPADSetSensorHeight(s32 chan, f32 height) {
 	if (valid(chan) && std::isfinite(height)) {
 		channels[chan].sensorHeight = height;
+	}
+}
+
+void KPADSetAccParam(s32 chan, f32 radius, f32 sensitivity) {
+	if (valid(chan)) {
+		set_filter(channels[chan].acc, radius, sensitivity);
 	}
 }
 

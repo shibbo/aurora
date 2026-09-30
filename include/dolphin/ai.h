@@ -26,7 +26,11 @@ BOOL AIGetDMAEnableFlag(void);
 void AIStartDMA(void);
 void AIStopDMA(void);
 u32 AIGetDMABytesLeft(void);
+#ifdef TARGET_PC
+uintptr_t AIGetDMAStartAddr(void);
+#else
 u32 AIGetDMAStartAddr(void);
+#endif
 u32 AIGetDMALength(void);
 BOOL AICheckInit(void);
 AISCallback AIRegisterStreamCallback(AISCallback callback);
