@@ -300,6 +300,18 @@ void end_frame() noexcept {
   gfx::end_frame([black, brightness, rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
                   imguiDrawData = std::move(imguiDrawData)](
                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
+    // submit scene rendering before acquiring the swapchain image so the GPU can work during the VSync wait
+    // simple solution for some stutters from my testing
+    const auto presentMode = webgpu::g_graphicsConfig.surfaceConfiguration.presentMode;
+    if (presentMode == wgpu::PresentMode::Fifo || presentMode == wgpu::PresentMode::FifoRelaxed) {
+      const wgpu::CommandBufferDescriptor sceneDescriptor{.label = "Scene command buffer"};
+      const auto sceneCommands = encoder.Finish(&sceneDescriptor);
+      g_queue.Submit(1, &sceneCommands);
+
+      const wgpu::CommandEncoderDescriptor presentDescriptor{.label = "Present encoder"};
+      encoder = g_device.CreateCommandEncoder(&presentDescriptor);
+    }
+
     wgpu::Texture currentTexture;
     wgpu::TextureView currentView;
     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
@@ -343,12 +355,12 @@ void end_frame() noexcept {
         const auto pass = encoder.BeginRenderPass(&renderPassDescriptor);
         // Copy EFB -> XFB (swapchain)
         if (brightness < 1.0f) {
-			pass.SetPipeline(webgpu::g_CopyDimmedPipeline);
-			const wgpu::Color blend{brightness, brightness, brightness, 1.0};
-			pass.SetBlendConstant(&blend);
-		} else {
-			pass.SetPipeline(webgpu::g_CopyPipeline);
-		}
+          pass.SetPipeline(webgpu::g_CopyDimmedPipeline);
+          const wgpu::Color blend{brightness, brightness, brightness, 1.0};
+          pass.SetBlendConstant(&blend);
+        } else {
+          pass.SetPipeline(webgpu::g_CopyPipeline);
+        }
         pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
         set_present_viewport(pass, viewport, webgpu::g_graphicsConfig.surfaceConfiguration.width,
                              webgpu::g_graphicsConfig.surfaceConfiguration.height);
