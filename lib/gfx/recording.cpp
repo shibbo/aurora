@@ -1018,8 +1018,8 @@ bool queue_draw_sync(uint16_t token, void (*callback)(uint16_t)) {
 		return false;
 	}
 
-	const auto texture = current_render_passes()[g_recorder.currentRenderPass].copySourceTexture;
-	return color_peek::queue(texture, token, callback);
+	const auto& pass = current_render_passes()[g_recorder.currentRenderPass];
+	return color_peek::queue(pass.copySourceTexture, pass.copySourceDepthView, pass.msaaSamples, token, callback);
 }
 
 bool push_encoder_task_from_fifo(EncoderTaskId type, const void* payload, size_t payloadSize) {

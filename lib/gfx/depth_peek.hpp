@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.hpp"
+#include <dolphin/gx/GXAurora.h>
 
 #include <vector>
 
@@ -14,6 +15,9 @@ bool read_latest(uint16_t x, uint16_t y, uint32_t& z) noexcept;
 
 void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
                            wgpu::Extent3D sourceSize, uint32_t msaaSamples) noexcept;
+bool encode_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
+	wgpu::Extent3D sourceSize, Vec2<uint32_t> logicalSize, AuroraViewportPolicy policy,
+	uint32_t msaaSamples, const wgpu::Buffer& destination, uint64_t offset);
 void after_submit() noexcept;
 
 namespace testing {

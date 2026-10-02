@@ -1,4 +1,6 @@
 #include "color_peek.hpp"
+#include "depth_peek.hpp"
+#include "../gx/gx.hpp"
 #include "recording.hpp"
 #include "../dolphin/vi/vi_internal.hpp"
 #include <cstring>
@@ -9,6 +11,12 @@ namespace aurora::gfx::color_peek {
 namespace {
 struct Readback {
 	wgpu::Texture texture;
+	wgpu::TextureView depthView;
+	AuroraViewportPolicy viewportPolicy = AURORA_VIEWPORT_FIT;
+	uint32_t msaaSamples = 1;
+	uint64_t depthOffset = 0;
+	uint64_t byteSize = 0;
+	bool hasDepth = false;
 	wgpu::Buffer buffer;
 	std::vector<uint8_t> pixels;
 	uint32_t width = 0;
@@ -41,7 +49,7 @@ void encode(const EncoderTaskContext& context, const wgpu::CommandEncoder& encod
 	const wgpu::BufferDescriptor descriptor{
 		.label = "GX color readback",
 		.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst,
-		.size = static_cast<uint64_t>(item->stride) * item->height,
+		.size = item->byteSize,
 	};
 	item->buffer = context.device.CreateBuffer(&descriptor);
 	const wgpu::TexelCopyTextureInfo source{.texture = item->texture};
@@ -51,6 +59,8 @@ void encode(const EncoderTaskContext& context, const wgpu::CommandEncoder& encod
 	};
 	const wgpu::Extent3D extent{item->width, item->height, 1};
 	encoder.CopyTextureToBuffer(&source, &destination, &extent);
+	item->hasDepth = depth_peek::encode_snapshot(encoder, item->depthView, extent,
+		{item->logicalWidth, item->logicalHeight}, item->viewportPolicy, item->msaaSamples, item->buffer, item->depthOffset);
 }
 
 void dispatch() {
@@ -95,7 +105,7 @@ void submitted(const EncoderTaskCompletionContext&, const void* payload, size_t,
 		return;
 	}
 
-	const uint64_t size = static_cast<uint64_t>(item->stride) * item->height;
+	const uint64_t size = item->byteSize;
 	item->buffer.MapAsync(wgpu::MapMode::Read, 0, size, wgpu::CallbackMode::AllowSpontaneous,
 		[item, size](wgpu::MapAsyncStatus status, wgpu::StringView) {
 			std::vector<uint8_t> pixels;
@@ -144,19 +154,25 @@ bool is_idle() {
 	return sPending.empty();
 }
 
-bool queue(const wgpu::Texture& texture, uint16_t token, void (*callback)(uint16_t)) {
+bool queue(const wgpu::Texture& texture, const wgpu::TextureView& depthView, uint32_t msaaSamples,
+	uint16_t token, void (*callback)(uint16_t)) {
 	if (!texture || sTask == InvalidEncoderTask) {
 		return false;
 	}
 
 	auto item = std::make_shared<Readback>();
 	item->texture = texture;
+	item->depthView = depthView;
+	item->viewportPolicy = gx::g_gxState.viewportPolicy;
+	item->msaaSamples = msaaSamples;
 	item->width = texture.GetWidth();
 	item->height = texture.GetHeight();
 	const auto logicalSize = vi::configured_fb_size();
 	item->logicalWidth = logicalSize.x;
 	item->logicalHeight = logicalSize.y;
 	item->stride = (item->width * 4 + 255) & ~255u;
+	item->depthOffset = static_cast<uint64_t>(item->stride) * item->height;
+	item->byteSize = item->depthOffset + static_cast<uint64_t>(item->logicalWidth) * item->logicalHeight * sizeof(uint32_t);
 	item->token = token;
 	item->callback = callback;
 	const auto format = texture.GetFormat();
@@ -199,6 +215,18 @@ bool read(uint16_t x, uint16_t y, uint8_t* rgba) {
 		std::swap(rgba[0], rgba[2]);
 	}
 
+	return true;
+}
+
+bool read_depth(uint16_t x, uint16_t y, uint32_t& depth) {
+	std::lock_guard lock{sMutex};
+	const Readback* item = sCurrent;
+	if (item == nullptr || !item->hasDepth || item->pixels.empty() || x >= item->logicalWidth || y >= item->logicalHeight) {
+		return false;
+	}
+
+	const size_t index = static_cast<size_t>(y) * item->logicalWidth + x;
+	std::memcpy(&depth, item->pixels.data() + item->depthOffset + index * sizeof(uint32_t), sizeof(depth));
 	return true;
 }
 }

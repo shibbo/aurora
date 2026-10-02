@@ -199,7 +199,7 @@ wgpu::BindGroupLayout create_bind_group_layout(const char* label) {
   return g_device.CreateBindGroupLayout(&descriptor);
 }
 
-Params make_params(wgpu::Extent3D sourceSize, Vec2<uint32_t> dstSize) noexcept {
+Params make_params(wgpu::Extent3D sourceSize, Vec2<uint32_t> dstSize, AuroraViewportPolicy policy) noexcept {
   Params params{
       .dstWidth = dstSize.x,
       .dstHeight = dstSize.y,
@@ -207,16 +207,16 @@ Params make_params(wgpu::Extent3D sourceSize, Vec2<uint32_t> dstSize) noexcept {
       .srcHeight = sourceSize.height,
   };
 
-  if (gx::g_gxState.viewportPolicy == AURORA_VIEWPORT_NATIVE) {
+  if (policy == AURORA_VIEWPORT_NATIVE) {
     return params;
   }
 
-  const auto logicalSize = vi::configured_fb_size();
+  const auto logicalSize = dstSize;
   if (logicalSize.x == 0 || logicalSize.y == 0 || sourceSize.width == 0 || sourceSize.height == 0) {
     return params;
   }
 
-  const bool stretch = gx::g_gxState.viewportPolicy == AURORA_VIEWPORT_STRETCH;
+  const bool stretch = policy == AURORA_VIEWPORT_STRETCH;
   const float scaleX = static_cast<float>(sourceSize.width) / static_cast<float>(logicalSize.x);
   const float scaleY = static_cast<float>(sourceSize.height) / static_cast<float>(logicalSize.y);
   const float scale = std::min(scaleX, scaleY);
@@ -227,6 +227,50 @@ Params make_params(wgpu::Extent3D sourceSize, Vec2<uint32_t> dstSize) noexcept {
   params.offsetY =
       stretch ? 0.f : (static_cast<float>(sourceSize.height) - static_cast<float>(logicalSize.y) * scale) * 0.5f;
   return params;
+}
+
+void encode_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView, const Params& params,
+	const wgpu::Buffer& storageBuffer, const wgpu::Buffer& paramsBuffer, const wgpu::Buffer& readbackBuffer,
+	uint64_t offset, uint64_t byteSize) {
+	AURORA_ASSERT(render_worker::is_worker_thread(), "Depth peek queue write must run on the render worker");
+	g_queue.WriteBuffer(paramsBuffer, 0, &params, sizeof(params));
+
+	const std::array bindGroupEntries{
+		wgpu::BindGroupEntry{
+			.binding = 0,
+			.textureView = depthView,
+		},
+		wgpu::BindGroupEntry{
+			.binding = 1,
+			.buffer = storageBuffer,
+			.size = byteSize,
+		},
+		wgpu::BindGroupEntry{
+			.binding = 2,
+			.buffer = paramsBuffer,
+			.size = sizeof(Params),
+		},
+	};
+	const wgpu::BindGroupDescriptor bindGroupDescriptor{
+		.label = "Depth Peek Bind Group",
+		.layout = g_bindGroupLayout,
+		.entryCount = bindGroupEntries.size(),
+		.entries = bindGroupEntries.data(),
+	};
+	const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
+
+	const wgpu::ComputePassDescriptor passDescriptor{
+		.label = "Depth Peek Compute Pass",
+		.timestampWrites = webgpu::gpu_prof::pass_writes("Depth peek"),
+	};
+	const auto pass = cmd.BeginComputePass(&passDescriptor);
+	pass.SetPipeline(g_pipeline);
+	pass.SetBindGroup(0, bindGroup);
+	pass.DispatchWorkgroups((params.dstWidth + WorkgroupSizeX - 1) / WorkgroupSizeX,
+		(params.dstHeight + WorkgroupSizeY - 1) / WorkgroupSizeY);
+	pass.End();
+
+	cmd.CopyBufferToBuffer(storageBuffer, 0, readbackBuffer, offset, byteSize);
 }
 
 bool ensure_slot(Slot& slot, uint32_t width, uint32_t height) {
@@ -365,7 +409,7 @@ void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureV
     Log.fatal("Depth Peek from multisampled EFB targets is not supported");
   }
 
-  const Params params = make_params(sourceSize, dstSize);
+  const Params params = make_params(sourceSize, dstSize, gx::g_gxState.viewportPolicy);
   wgpu::Buffer storageBuffer;
   wgpu::Buffer readbackBuffer;
   wgpu::Buffer paramsBuffer;
@@ -383,45 +427,36 @@ void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureV
     byteSize = slot->byteSize;
   }
 
-  AURORA_ASSERT(render_worker::is_worker_thread(), "Depth peek queue write must run on the render worker");
-  g_queue.WriteBuffer(paramsBuffer, 0, &params, sizeof(params));
+	encode_snapshot(cmd, depthView, params, storageBuffer, paramsBuffer, readbackBuffer, 0, byteSize);
+}
 
-  const std::array bindGroupEntries{
-      wgpu::BindGroupEntry{
-          .binding = 0,
-          .textureView = depthView,
-      },
-      wgpu::BindGroupEntry{
-          .binding = 1,
-          .buffer = storageBuffer,
-          .size = byteSize,
-      },
-      wgpu::BindGroupEntry{
-          .binding = 2,
-          .buffer = paramsBuffer,
-          .size = sizeof(Params),
-      },
-  };
-  const wgpu::BindGroupDescriptor bindGroupDescriptor{
-      .label = "Depth Peek Bind Group",
-      .layout = g_bindGroupLayout,
-      .entryCount = bindGroupEntries.size(),
-      .entries = bindGroupEntries.data(),
-  };
-  const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
+bool encode_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
+	wgpu::Extent3D sourceSize, Vec2<uint32_t> logicalSize, AuroraViewportPolicy policy,
+	uint32_t msaaSamples, const wgpu::Buffer& destination, uint64_t offset) {
+	if (!g_enabled || !depthView || logicalSize.x == 0 || logicalSize.y == 0 || sourceSize.width == 0 || sourceSize.height == 0) {
+		return false;
+	}
 
-  const wgpu::ComputePassDescriptor passDescriptor{
-      .label = "Depth Peek Compute Pass",
-      .timestampWrites = webgpu::gpu_prof::pass_writes("Depth peek"),
-  };
-  const auto pass = cmd.BeginComputePass(&passDescriptor);
-  pass.SetPipeline(g_pipeline);
-  pass.SetBindGroup(0, bindGroup);
-  pass.DispatchWorkgroups((dstSize.x + WorkgroupSizeX - 1) / WorkgroupSizeX,
-                          (dstSize.y + WorkgroupSizeY - 1) / WorkgroupSizeY);
-  pass.End();
+	if (msaaSamples > 1) {
+		return false;
+	}
 
-  cmd.CopyBufferToBuffer(storageBuffer, 0, readbackBuffer, 0, byteSize);
+	const uint64_t byteSize = static_cast<uint64_t>(logicalSize.x) * logicalSize.y * sizeof(uint32_t);
+	const wgpu::BufferDescriptor storageDescriptor{
+		.label = "Draw sync depth storage",
+		.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc,
+		.size = byteSize,
+	};
+	const wgpu::BufferDescriptor paramsDescriptor{
+		.label = "Draw sync depth parameters",
+		.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
+		.size = sizeof(Params),
+	};
+	const auto storageBuffer = g_device.CreateBuffer(&storageDescriptor);
+	const auto paramsBuffer = g_device.CreateBuffer(&paramsDescriptor);
+	const auto params = make_params(sourceSize, logicalSize, policy);
+	encode_snapshot(cmd, depthView, params, storageBuffer, paramsBuffer, destination, offset, byteSize);
+	return true;
 }
 
 void after_submit() noexcept {

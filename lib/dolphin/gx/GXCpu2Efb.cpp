@@ -6,6 +6,10 @@
 #include <dolphin/gx/GXCpu2Efb.h>
 
 void GXPeekZ(u16 x, u16 y, u32* z) {
+	if (z != nullptr && aurora::gfx::color_peek::read_depth(x, y, *z)) {
+		return;
+	}
+
   if (z != nullptr) {
     u32 value = 0;
     if (aurora::gfx::depth_peek::read_latest(x, y, value)) {
